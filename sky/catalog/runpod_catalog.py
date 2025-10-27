@@ -13,8 +13,9 @@ if typing.TYPE_CHECKING:
     from sky.clouds import cloud
 
 # Runpod has no set updated schedule for their catalog. We pull the catalog
-# every 7 hours to make sure we have the latest information.
-_PULL_FREQUENCY_HOURS = 7
+# every hour to ensure we have the latest GPU availability and pricing.
+# This is especially important for high-demand GPUs like L40S in EU regions.
+_PULL_FREQUENCY_HOURS = 1
 _df = common.read_catalog('runpod/vms.csv',
                           pull_frequency_hours=_PULL_FREQUENCY_HOURS)
 
