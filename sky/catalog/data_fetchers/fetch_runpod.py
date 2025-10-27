@@ -27,7 +27,7 @@ from runpod.api import graphql
 # Therefore we hard code a default number of vCPUs from:
 # 1. The previous catalog, if the GPU exists there
 # 2. Or if not, the pricing page https://www.runpod.io/pricing
-# 3. Otherwise, the minimum of the returned# vCPU count from the API
+# 3. Otherwise, the minimum of the returned vCPU count from the API
 # The max count of GPUs per pod is set to 8 apart from A40 at 10
 DEFAULT_MAX_GPUS = 8
 DEFAULT_GPU_INFO: Dict[str, Dict[str, Union[int, float]]] = {

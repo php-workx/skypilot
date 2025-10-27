@@ -22,10 +22,9 @@ on:
   push:
     branches:
       - 'feature/runpod-catalog-fetcher'
-      - 'ojin-releases'
 
 env:
-  AWS_REGION: us-east-1  # Change to your ECR region
+  AWS_REGION: eu-central-1
   # ECR_REGISTRY will be set dynamically from AWS account
 
 jobs:
@@ -62,14 +61,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # Option 1: OIDC (recommended - no long-lived credentials)
           role-to-assume: ${{ secrets.AWS_ECR_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-
-          # Option 2: Access keys (fallback - requires AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY secrets)
-          # aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          # aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          # aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
@@ -79,7 +72,7 @@ jobs:
         id: ecr-repo
         run: |
           ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
-          ECR_REPOSITORY="skypilot"  # Change to your ECR repository name
+          ECR_REPOSITORY="ojin/skypilot"
           echo "registry=${ECR_REGISTRY}" >> $GITHUB_OUTPUT
           echo "repository=${ECR_REPOSITORY}" >> $GITHUB_OUTPUT
           echo "ECR Registry: ${ECR_REGISTRY}"
@@ -130,14 +123,12 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           labels: |
-            org.opencontainers.image.title=SkyPilot Custom
-            org.opencontainers.image.description=Custom SkyPilot with RunPod catalog improvements
+            org.opencontainers.image.title=Ojin SkyPilot
+            org.opencontainers.image.description=Custom SkyPilot with various improvements
             org.opencontainers.image.version=${{ inputs.version_tag }}
             org.opencontainers.image.source=${{ github.repository }}
             org.opencontainers.image.revision=${{ steps.commit_info.outputs.sha }}
             org.opencontainers.image.created=${{ steps.commit_info.outputs.date }}
-            custom.runpod-catalog=hourly-refresh
-            custom.feature-branch=${{ inputs.build_from_branch }}
 
       - name: Image digest
         run: echo "Built and pushed image with tags ${{ steps.tags.outputs.tags }}"
