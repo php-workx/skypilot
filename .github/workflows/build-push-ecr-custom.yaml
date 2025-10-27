@@ -1,4 +1,4 @@
-name: Build and Push Custom SkyPilot to ECR
+name: Build and Push Custom Ojin SkyPilot to ECR
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ on:
         description: 'Branch to build from'
         required: true
         type: string
-        default: 'feature/runpod-catalog-fetcher'
+        default: 'ojin-releases'
       push_latest:
         description: 'Also tag and push as :latest'
         required: false
@@ -22,10 +22,7 @@ on:
   push:
     branches:
       - 'feature/runpod-catalog-fetcher'
-    paths:
-      - 'sky/**'
-      - 'Dockerfile'
-      - '.github/workflows/build-push-ecr-custom.yaml'
+      - 'ojin-releases'
 
 env:
   AWS_REGION: us-east-1  # Change to your ECR region
@@ -162,25 +159,6 @@ jobs:
           \`\`\`
           ${{ steps.tags.outputs.tags }}
           \`\`\`
-
-          ### Features in This Build
-          - ✅ RunPod catalog hourly refresh (1-hour frequency)
-          - ✅ PR #6824 integration (dynamic catalog fetcher)
-          - ✅ Built from source with full dashboard
-
-          ### Usage
-          \`\`\`bash
-          # Pull this image
-          docker pull ${{ steps.tags.outputs.primary_tag }}
-
-          # Or use in Kubernetes/ECS
-          image: ${{ steps.tags.outputs.primary_tag }}
-          \`\`\`
-
-          ### Next Steps
-          - Deploy to staging environment
-          - Test RunPod provisioning with hourly refresh
-          - Monitor catalog updates in logs
           EOF
 
       - name: Notify on failure
