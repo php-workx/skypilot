@@ -3358,6 +3358,7 @@ def _down_or_stop_clusters(
                 success_progress = True
                 message = (f'{colorama.Fore.GREEN}{operation} '
                            f'cluster {name!r}...done{colorama.Style.RESET_ALL}')
+                successes.append(name)
                 if idle_minutes_to_autostop >= 0:
                     option_str = 'down' if down else 'stop'
                     passive_str = 'downed' if down else 'stopped'
@@ -3428,17 +3429,30 @@ def _down_or_stop_clusters(
         click.secho(f'{operation} requests are sent. Check the requests\' '
                     'status with `sky request get <request_id>`.')
 
-    click.echo('\nSummary:')
-    if successes:
-        click.echo('  ✓ Succeeded: ' + ', '.join(successes))
+    show_summary = len(clusters) > 1
+
+    if show_summary:
+        click.echo('\nSummary:')
+        if successes:
+            # Preserve the original order of clusters as provided by user.
+            click.echo('  ✓ Succeeded: ' + ', '.join(successes))
+        if failures:
+            # Format failures: if one failure, keep on same line. If multiple,
+            # indent each failed cluster on its own line for readability.
+            if len(failures) == 1:
+                name, reason = failures[0]
+                first = reason.strip().splitlines()[0]
+                first = first if len(first) <= 120 else first[:120] + '…'
+                click.echo(f'  ✗ Failed: {name} ({first})')
+            else:
+                click.echo('  ✗ Failed:')
+                for name, reason in failures:
+                    first = reason.strip().splitlines()[0]
+                    first = first if len(first) <= 120 else first[:120] + '…'
+                    click.echo(f'      {name} ({first})')
+
     if failures:
-        failed_pretty = []
-        for name, reason in failures:
-            first = reason.strip().splitlines()[0]
-            first = first if len(first) <= 120 else first[:120] + '…'
-            failed_pretty.append(f'{name} ({first})')
-        click.echo('  ✗ Failed: ' + ', '.join(failed_pretty))
-        raise click.ClickException('Some clusters failed. See summary above.')
+        click.echo('Cluster(s) failed. See details above.')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -4237,6 +4251,10 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
 def volumes():
     """SkyPilot Volumes CLI."""
     pass
+
+
+# Add 'volume' as an alias for 'volumes'
+cli.add_command(volumes, name='volume')
 
 
 @volumes.command('apply', cls=_DocumentedCodeCommand)
@@ -6340,7 +6358,7 @@ INT_OR_NONE = IntOrNone()
 
 @api.command('status', cls=_DocumentedCodeCommand)
 @flags.config_option(expose_value=False)
-@click.argument('request_ids',
+@click.argument('request_id_prefixes',
                 required=False,
                 type=str,
                 nargs=-1,
@@ -6362,15 +6380,16 @@ INT_OR_NONE = IntOrNone()
 @flags.verbose_option('Show more details.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_status(request_ids: Optional[List[str]], all_status: bool,
+def api_status(request_id_prefixes: Optional[List[str]], all_status: bool,
                verbose: bool, limit: Optional[int]):
     """List requests on SkyPilot API server."""
-    if not request_ids:
-        request_ids = None
+    if not request_id_prefixes:
+        request_id_prefixes = None
     fields = _DEFAULT_REQUEST_FIELDS_TO_SHOW
     if verbose:
         fields = _VERBOSE_REQUEST_FIELDS_TO_SHOW
-    request_list = sdk.api_status(request_ids, all_status, limit, fields)
+    request_list = sdk.api_status(request_id_prefixes, all_status, limit,
+                                  fields)
     columns = ['ID', 'User', 'Name']
     if verbose:
         columns.append('Cluster')
