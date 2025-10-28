@@ -9,7 +9,7 @@ jobs:
   python-test:
     strategy:
       matrix:
-        python-version: ["3.8"]
+        python-version: ["3.11"]
         test-path:
           # Group them based on running time to save CI time and resources
           - tests/unit_tests
