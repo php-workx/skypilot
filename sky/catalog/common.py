@@ -11,6 +11,7 @@ import filelock
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.catalog import catalog_url_config
 from sky.clouds import cloud as cloud_lib
 from sky.skylet import constants
 from sky.utils import annotations
@@ -208,8 +209,10 @@ def read_catalog(filename: str,
             if not _need_update():
                 return False
 
-            url = f'{constants.HOSTED_CATALOG_DIR_URL}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
-            url_fallback = f'{constants.HOSTED_CATALOG_DIR_URL_S3_MIRROR}/{constants.CATALOG_SCHEMA_VERSION}/{filename}'  # pylint: disable=line-too-long
+            # Use custom catalog URL if configured
+            url = catalog_url_config.get_catalog_url(filename)
+            url_fallback = catalog_url_config.get_catalog_url_fallback(filename)
+
             headers = {'User-Agent': 'SkyPilot/0.7'}
             update_frequency_str = ''
             if pull_frequency_hours is not None:
@@ -220,13 +223,20 @@ def read_catalog(filename: str,
                         f'Updating {cloud} catalog: {filename}') +
                     f'{update_frequency_str}'):
                 try:
-                    r = requests.get(url=url, headers=headers)
-                    if r.status_code == 429:
+                    r = requests.get(url=url, headers=headers, timeout=20)
+                    if r.status_code in (429, 403, 502, 503,
+                                         504) and url_fallback:
                         # fallback to s3 mirror, github introduced rate
                         # limit after 2025-05, see
                         # https://github.com/skypilot-org/skypilot/issues/5438
                         # for more details
-                        r = requests.get(url=url_fallback, headers=headers)
+                        logger.info(
+                            'Primary catalog URL %s returned %s; '
+                            'falling back to %s', url, r.status_code,
+                            url_fallback)
+                        r = requests.get(url=url_fallback,
+                                         headers=headers,
+                                         timeout=20)
                     r.raise_for_status()
                 except requests.exceptions.RequestException as e:
                     error_str = (f'Failed to fetch {cloud} catalog '

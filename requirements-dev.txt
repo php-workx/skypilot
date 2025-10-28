@@ -35,6 +35,8 @@ pytest
 pytest-xdist
 pytest-env>=0.6
 pytest-asyncio
+pytest-cov
+pytest-watch
 
 # memory profiler
 memory_profiler==0.61.0
