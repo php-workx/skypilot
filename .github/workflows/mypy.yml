@@ -3,6 +3,7 @@ name: mypy
 on:
   pull_request:
     branches:
+      - ojin-pre-release
       - ojin-releases
 
 jobs:

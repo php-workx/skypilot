@@ -92,10 +92,9 @@ jobs:
 
           # Additional tags
           COMMIT_TAG="${ECR_REGISTRY}/${ECR_REPOSITORY}:${VERSION_TAG}-${COMMIT_SHA}"
-          DATE_TAG="${ECR_REGISTRY}/${ECR_REPOSITORY}:${VERSION_TAG}-${COMMIT_DATE}"
 
           # Construct tags list
-          TAGS="${PRIMARY_TAG},${COMMIT_TAG},${DATE_TAG}"
+          TAGS="${PRIMARY_TAG},${COMMIT_TAG}"
 
           # Add :latest if requested
           if [ "${{ inputs.push_latest }}" == "true" ]; then

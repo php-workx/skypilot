@@ -3,6 +3,7 @@ name: compile-protos-check
 on:
   pull_request:
     branches:
+      - ojin-pre-release
       - ojin-releases
 
 jobs:
