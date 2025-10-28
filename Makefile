@@ -3,10 +3,14 @@
 # Quick commands for local development, testing, and code quality checks
 # Supports using tools like uv for virtual environment management
 
-.PHONY: help install test-local test-unit test-integration lint format type-check check clean dev
+.PHONY: help install test-local test-unit test-integration lint format type-check check clean dev all test
 
 # Default target
 .DEFAULT_GOAL := help
+
+all: help ## Alias for help (conventional)
+
+test: test-local ## Alias for test-local (conventional)
 
 # Python and environment settings
 PYTHON_VERSION := 3.11
@@ -104,7 +108,6 @@ test-verbose: ## Run tests with verbose output (single file or pattern)
 
 test-coverage: ## Run tests with coverage report
 	@echo "🧪 Running tests with coverage..."
-	$(UV) pip install --python $(PYTHON) pytest-cov
 	$(PYTEST) tests/unit_tests/ --cov=sky --cov-report=html --cov-report=term
 	@echo "📊 Coverage report generated in htmlcov/index.html"
 
@@ -112,6 +115,10 @@ test-coverage: ## Run tests with coverage report
 
 format: ## Format code with yapf, black, and isort
 	@echo "🎨 Formatting code..."
+	@if [ ! -f "$(VENV_DIR)/bin/yapf" ] || [ ! -f "$(VENV_DIR)/bin/black" ] || [ ! -f "$(VENV_DIR)/bin/isort" ]; then \
+		echo "❌ Error: Formatting tools not installed. Run: make install"; \
+		exit 1; \
+	fi
 	@echo "Running yapf (general files)..."
 	@$(VENV_DIR)/bin/yapf --recursive --parallel --in-place \
 		--exclude 'sky/skylet/providers/ibm/*' \
@@ -130,6 +137,10 @@ format: ## Format code with yapf, black, and isort
 
 lint: ## Run linting with pylint
 	@echo "🔍 Running pylint..."
+	@if [ ! -f "$(VENV_DIR)/bin/pylint" ]; then \
+		echo "❌ Error: pylint not installed. Run: make install"; \
+		exit 1; \
+	fi
 	@$(VENV_DIR)/bin/pylint \
 		--rcfile=.pylintrc \
 		--load-plugins=pylint_quotes \
@@ -139,6 +150,10 @@ lint: ## Run linting with pylint
 
 type-check: ## Run type checking with mypy
 	@echo "🔍 Running mypy type checker..."
+	@if [ ! -f "$(VENV_DIR)/bin/mypy" ]; then \
+		echo "❌ Error: mypy not installed. Run: make install"; \
+		exit 1; \
+	fi
 	@$(VENV_DIR)/bin/mypy sky \
 		--exclude 'sky/benchmark|sky/callbacks|sky/backends/monkey_patches' \
 		--cache-dir=/dev/null || true
@@ -152,8 +167,7 @@ pre-commit: check test-unit ## Run pre-commit checks (format, lint, type-check, 
 
 ##@ Development Helpers
 
-watch-tests: ## Watch for changes and re-run tests (requires pytest-watch)
-	@$(UV) pip install --python $(PYTHON) pytest-watch
+watch-tests: ## Watch for changes and re-run tests
 	@$(VENV_DIR)/bin/ptw tests/unit_tests/ -- -n 4 --dist worksteal
 
 debug-test: ## Run single test with debugger (set TEST variable)
@@ -180,26 +194,6 @@ info: ## Show environment information
 	@echo "Test environment variables:"
 	@echo "  SKYPILOT_DISABLE_USAGE_COLLECTION=$(SKYPILOT_DISABLE_USAGE_COLLECTION)"
 	@echo "  SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=$(SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK)"
-
-##@ CI Simulation
-
-ci-unit: ## Simulate CI unit tests
-	@echo "🤖 Simulating CI unit tests..."
-	$(PYTEST) tests/unit_tests/ -n 4 --dist worksteal --tb=short
-
-ci-integration: ## Simulate CI integration tests
-	@echo "🤖 Simulating CI integration tests..."
-	$(PYTEST) tests/test_cli.py -n 4 --dist worksteal --tb=short
-	$(PYTEST) tests/test_optimizer_dryruns.py -k "partial" -n 4 --dist worksteal --tb=short
-	$(PYTEST) tests/test_optimizer_dryruns.py -k "not partial" -n 4 --dist worksteal --tb=short
-	$(PYTEST) tests/test_jobs_and_serve.py tests/test_yaml_parser.py \
-		tests/test_global_user_state.py tests/test_config.py tests/test_jobs.py \
-		tests/test_list_accelerators.py tests/test_wheels.py tests/test_api.py \
-		tests/test_storage.py tests/test_api_compatibility.py \
-		-n 4 --dist worksteal --tb=short
-
-ci-all: ci-unit ci-integration ## Simulate full CI test suite
-	@echo "✅ CI simulation complete!"
 
 ##@ Quick Reference
 

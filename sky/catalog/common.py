@@ -223,13 +223,20 @@ def read_catalog(filename: str,
                         f'Updating {cloud} catalog: {filename}') +
                     f'{update_frequency_str}'):
                 try:
-                    r = requests.get(url=url, headers=headers)
-                    if r.status_code == 429 and url_fallback:
+                    r = requests.get(url=url, headers=headers, timeout=20)
+                    if r.status_code in (429, 403, 502, 503,
+                                         504) and url_fallback:
                         # fallback to s3 mirror, github introduced rate
                         # limit after 2025-05, see
                         # https://github.com/skypilot-org/skypilot/issues/5438
                         # for more details
-                        r = requests.get(url=url_fallback, headers=headers)
+                        logger.info(
+                            'Primary catalog URL %s returned %s; '
+                            'falling back to %s', url, r.status_code,
+                            url_fallback)
+                        r = requests.get(url=url_fallback,
+                                         headers=headers,
+                                         timeout=20)
                     r.raise_for_status()
                 except requests.exceptions.RequestException as e:
                     error_str = (f'Failed to fetch {cloud} catalog '

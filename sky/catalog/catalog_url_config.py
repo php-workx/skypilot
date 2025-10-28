@@ -34,8 +34,8 @@ def get_catalog_url(filename: str) -> str:
     """Get the catalog URL for a given filename.
 
     Checks for custom URLs in the following order:
-    1. Cloud-specific environment variable (SKYPILOT_<CLOUD>_CATALOG_URL)
-    2. Base URL override (SKYPILOT_CATALOG_BASE_URL)
+    1. Cloud-specific URL override (SKYPILOT_<CLOUD>_CATALOG_URL)
+    2. Global base URL override (SKYPILOT_CATALOG_BASE_URL)
     3. Default SkyPilot hosted catalog URL
 
     Args:
@@ -62,12 +62,16 @@ master/catalogs/v8/runpod/vms.csv'
         >>> get_catalog_url('aws/vms.csv')
         'https://example.com/catalogs/v8/aws/vms.csv'
     """
-    # Extract cloud name from filename (e.g., 'runpod' from 'runpod/vms.csv')
-    cloud_name = os.path.dirname(filename).split('/')[0].upper()
+    # Extract cloud name from filename (e.g., 'runpod' from 'runpod/vms.csv').
+    parts = filename.split('/')
+    cloud_name = parts[0].upper() if len(parts) > 1 else ''
 
     # Check for cloud-specific URL override
-    cloud_specific_env = f'SKYPILOT_{cloud_name}_CATALOG_URL'
-    custom_url = os.getenv(cloud_specific_env)
+    if cloud_name:
+        cloud_specific_env = f'SKYPILOT_{cloud_name}_CATALOG_URL'
+        custom_url = os.getenv(cloud_specific_env)
+    else:
+        custom_url = None
 
     if custom_url:
         return custom_url

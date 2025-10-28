@@ -58,8 +58,9 @@ COPY --from=gcloud-apt-install /usr/lib/google-cloud-sdk /opt/google-cloud-sdk
 # Set environment variable
 ENV PATH="/opt/google-cloud-sdk/bin:$PATH"
 
-# Set custom catalog URLs via environment variables
-ENV SKYPILOT_RUNPOD_CATALOG_URL="https://raw.githubusercontent.com/php-workx/skypilot-catalog/ojin-catalog/catalogs/v8/runpod/vms.csv"
+# Set custom catalog URL (build-time overridable), then export to runtime env
+ARG SKYPILOT_RUNPOD_CATALOG_URL="https://raw.githubusercontent.com/php-workx/skypilot-catalog/ojin-catalog/catalogs/v8/runpod/vms.csv"
+ENV SKYPILOT_RUNPOD_CATALOG_URL=${SKYPILOT_RUNPOD_CATALOG_URL}
 
 # Detect architecture
 ARG TARGETARCH
