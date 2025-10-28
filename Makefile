@@ -108,6 +108,10 @@ test-verbose: ## Run tests with verbose output (single file or pattern)
 
 test-coverage: ## Run tests with coverage report
 	@echo "🧪 Running tests with coverage..."
+	@if ! $(PYTHON) -c "import pytest_cov" 2>/dev/null; then \
+		echo "❌ Error: pytest-cov not installed. Run: make install"; \
+		exit 1; \
+	fi
 	$(PYTEST) tests/unit_tests/ --cov=sky --cov-report=html --cov-report=term
 	@echo "📊 Coverage report generated in htmlcov/index.html"
 
@@ -168,6 +172,10 @@ pre-commit: check test-unit ## Run pre-commit checks (format, lint, type-check, 
 ##@ Development Helpers
 
 watch-tests: ## Watch for changes and re-run tests
+	@if [ ! -f "$(VENV_DIR)/bin/ptw" ]; then \
+		echo "❌ Error: pytest-watch not installed. Run: make install"; \
+		exit 1; \
+	fi
 	@$(VENV_DIR)/bin/ptw tests/unit_tests/ -- -n 4 --dist worksteal
 
 debug-test: ## Run single test with debugger (set TEST variable)
