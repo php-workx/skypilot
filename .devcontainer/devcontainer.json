@@ -26,7 +26,7 @@
         "charliermarsh.ruff"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.defaultInterpreterPath": "/opt/conda/bin/python",
         "python.formatting.provider": "none",
         "python.linting.enabled": true,
         "python.linting.pylintEnabled": false,

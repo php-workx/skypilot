@@ -1,11 +1,11 @@
 """Cudo Compute"""
+import importlib
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Type, Union
+from typing import cast, Dict, Iterator, List, Optional, Tuple, Type, Union
 
 from sky import catalog
 from sky import clouds
-from sky.adaptors import common
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -23,19 +23,31 @@ _CREDENTIAL_FILES = [
 
 def _load_cudo_api_module() -> Tuple[typing.Any, Type[Exception]]:
     """Returns the Cudo API module and its ApiException."""
-    errors = []
-    try:
-        from cudo_compute import cudo_api as module
-        from cudo_compute.rest import ApiException  # type: ignore
-        return module, ApiException
-    except ImportError as e:
-        errors.append(e)
-    try:
-        import cudo_api as module  # type: ignore
-        from cudo_api.rest import ApiException  # type: ignore
-        return module, ApiException
-    except ImportError as e:
-        errors.append(e)
+    errors: List[BaseException] = []
+    candidates = (
+        ('cudo_compute.cudo_api', 'cudo_compute.rest'),
+        ('cudo_api', 'cudo_api.rest'),
+    )
+    for module_path, rest_module_path in candidates:
+        try:
+            module = importlib.import_module(module_path)
+        except ImportError as error:
+            errors.append(error)
+            continue
+
+        try:
+            rest_module = importlib.import_module(rest_module_path)
+            api_exception_cls = getattr(rest_module, 'ApiException')
+        except (ImportError, AttributeError) as error:
+            errors.append(error)
+            continue
+
+        if not isinstance(api_exception_cls, type):
+            errors.append(
+                TypeError(f'{rest_module_path}.ApiException is not a class.'))
+            continue
+
+        return module, cast(Type[Exception], api_exception_cls)
 
     if errors:
         raise ImportError('Failed to import Cudo API module.') from errors[-1]
@@ -310,7 +322,7 @@ class Cudo(clouds.Cloud):
         """Checks if the user has access credentials to
         Cudo's compute service."""
         try:
-            cudo_api_module, ApiException = _load_cudo_api_module()
+            cudo_api_module, api_exception_cls = _load_cudo_api_module()
         except ImportError as e:
             return False, (
                 f'{cls._DEPENDENCY_HINT}\n'
@@ -349,7 +361,7 @@ class Cudo(clouds.Cloud):
             api = cudo_api_module.virtual_machines()
             api.list_vms(project_id)
             return True, None
-        except ApiException as e:
+        except api_exception_cls as e:
             return False, (
                 f'Error calling API '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
