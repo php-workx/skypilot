@@ -1,7 +1,7 @@
 """Cudo Compute"""
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Tuple, Type, Union
 
 from sky import catalog
 from sky import clouds
@@ -19,6 +19,27 @@ _CREDENTIAL_FILES = [
     # credential files for Cudo,
     'cudo.yml'
 ]
+
+
+def _load_cudo_api_module() -> Tuple[typing.Any, Type[Exception]]:
+    """Returns the Cudo API module and its ApiException."""
+    errors = []
+    try:
+        from cudo_compute import cudo_api as module
+        from cudo_compute.rest import ApiException  # type: ignore
+        return module, ApiException
+    except ImportError as e:
+        errors.append(e)
+    try:
+        import cudo_api as module  # type: ignore
+        from cudo_api.rest import ApiException  # type: ignore
+        return module, ApiException
+    except ImportError as e:
+        errors.append(e)
+
+    if errors:
+        raise ImportError('Failed to import Cudo API module.') from errors[-1]
+    raise ImportError('Failed to import Cudo API module.')
 
 
 def _run_output(cmd):
@@ -288,9 +309,13 @@ class Cudo(clouds.Cloud):
             cls) -> Tuple[bool, Optional[Union[str, Dict[str, str]]]]:
         """Checks if the user has access credentials to
         Cudo's compute service."""
-        if not common.can_import_modules(['cudo_api']):
-            return False, (f'{cls._DEPENDENCY_HINT}\n'
-                           f'{cls._INDENT_PREFIX}')
+        try:
+            cudo_api_module, ApiException = _load_cudo_api_module()
+        except ImportError as e:
+            return False, (
+                f'{cls._DEPENDENCY_HINT}\n'
+                f'{cls._INDENT_PREFIX}'
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
         try:
             _run_output('cudoctl --version')
@@ -299,11 +324,8 @@ class Cudo(clouds.Cloud):
                 f'{cls._CREDENTIAL_HINT}\n'
                 f'{cls._INDENT_PREFIX}'
                 f'{common_utils.format_exception(e, use_bracket=True)}')
-        # pylint: disable=import-outside-toplevel,unused-import
-        from cudo_compute import cudo_api
-        from cudo_compute.rest import ApiException
         try:
-            _, error = cudo_api.make_client()
+            _, error = cudo_api_module.make_client()
         except FileNotFoundError as e:
             return False, (
                 'Cudo credentials are not set. '
@@ -316,7 +338,7 @@ class Cudo(clouds.Cloud):
                 f'Application credentials are not set. '
                 f'{common_utils.format_exception(error, use_bracket=True)}')
 
-        project_id, error = cudo_api.get_project_id()
+        project_id, error = cudo_api_module.get_project_id()
         if error is not None:
             return False, (
                 f'Default project is not set. '
@@ -324,7 +346,7 @@ class Cudo(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}'
                 f'{common_utils.format_exception(error, use_bracket=True)}')
         try:
-            api = cudo_api.virtual_machines()
+            api = cudo_api_module.virtual_machines()
             api.list_vms(project_id)
             return True, None
         except ApiException as e:
