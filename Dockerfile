@@ -60,7 +60,7 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "aarch64") echo "arm64" ;; \
         *) echo "$(uname -m)" ;; \
     esac)} && \
-    wget -q "https://download.cudocompute.com/cli/cudoctl-${ARCH}.deb" -O /tmp/cudoctl-${ARCH}.deb && \
+    curl -fsSL "https://download.cudocompute.com/cli/cudoctl-${ARCH}.deb" -o /tmp/cudoctl-${ARCH}.deb && \
     apt-get update && \
     apt-get install -y /tmp/cudoctl-${ARCH}.deb && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
