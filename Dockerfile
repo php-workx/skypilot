@@ -53,6 +53,19 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
 
 # Install Nebius CLI
 RUN curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INSTALL_FOLDER=/usr/local/bin bash
+
+# Install Cudo Compute CLI
+RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
+        "x86_64") echo "amd64" ;; \
+        "aarch64") echo "arm64" ;; \
+        *) echo "$(uname -m)" ;; \
+    esac)} && \
+    curl -fsSL "https://download.cudocompute.com/cli/cudoctl-${ARCH}.deb" -o /tmp/cudoctl-${ARCH}.deb && \
+    apt-get update && \
+    apt-get install -y /tmp/cudoctl-${ARCH}.deb && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    rm /tmp/cudoctl-${ARCH}.deb
+
 # Install uv
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \

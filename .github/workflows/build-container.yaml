@@ -1,0 +1,37 @@
+name: Test Container Build
+
+on:
+  pull_request:
+    branches:
+      - ojin-pre-release
+
+jobs:
+  build-test:
+    name: Test Container Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0  # Full history for version info
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/amd64
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: ojin/skypilot-custom:test
+          build-args: |
+            INSTALL_FROM_SOURCE=true
+            NEXT_BASE_PATH=/dashboard
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
