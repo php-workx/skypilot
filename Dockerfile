@@ -55,11 +55,6 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
 RUN curl -sSL https://storage.eu-north1.nebius.cloud/cli/install.sh | NEBIUS_INSTALL_FOLDER=/usr/local/bin bash
 
 # Install Cudo Compute CLI
-RUN wget -q https://download.cudocompute.com/cli/cudoctl-amd64.deb -O /tmp/cudoctl-amd64.deb && \
-  apt-get update && \
-  apt-get install -y /tmp/cudoctl-amd64.deb && \
-  rm /tmp/cudoctl-amd64.deb \
-# Install Cudo Compute CLI
 RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "x86_64") echo "amd64" ;; \
         "aarch64") echo "arm64" ;; \

@@ -1,4 +1,4 @@
-name: Build and Push Custom Ojin SkyPilot to ECR
+name: Test Container Build
 
 on:
   pull_request:
