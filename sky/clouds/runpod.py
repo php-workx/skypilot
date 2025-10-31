@@ -76,41 +76,9 @@ class RunPod(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        # Follow GCP's pattern: handle accelerators when provided
-        if accelerators is None:
-            # No accelerators specified, use instance_type only
-            regions = catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'runpod')
-        else:
-            # Accelerators specified
-            assert len(accelerators) == 1, accelerators
-            acc = list(accelerators.keys())[0]
-            acc_count = list(accelerators.values())[0]
-            acc_regions = catalog.get_region_zones_for_accelerators(
-                acc, acc_count, use_spot, clouds='runpod')
-
-            if instance_type is None:
-                # Only accelerator specified, use accelerator regions
-                regions = acc_regions
-            else:
-                # Both instance_type and accelerator specified
-                # Find intersection (regions/zones that have both)
-                vm_regions = catalog.get_region_zones_for_instance_type(
-                    instance_type, use_spot, 'runpod')
-                regions = []
-                for r1 in acc_regions:
-                    for r2 in vm_regions:
-                        if r1.name != r2.name:
-                            continue
-                        assert r1.zones is not None, r1
-                        assert r2.zones is not None, r2
-                        zones = []
-                        for z1 in r1.zones:
-                            for z2 in r2.zones:
-                                if z1.name == z2.name:
-                                    zones.append(z1)
-                        if zones:
-                            regions.append(r1.set_zones(zones))
+        del accelerators  # unused
+        regions = catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'runpod')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
