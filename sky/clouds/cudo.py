@@ -40,11 +40,18 @@ def _ensure_asyncio_timeout_support() -> None:
         if task is None:
             raise RuntimeError('asyncio.timeout requires a running task.')
 
-        handle = loop.call_later(delay, task.cancel)
+        timed_out = False
+
+        def _on_timeout() -> None:
+            nonlocal timed_out
+            timed_out = True
+            task.cancel()
+
+        handle = loop.call_later(delay, _on_timeout)
         try:
             yield
         except asyncio.CancelledError as exc:
-            if task.cancelled():
+            if timed_out:
                 raise asyncio.TimeoutError() from exc
             raise
         finally:
