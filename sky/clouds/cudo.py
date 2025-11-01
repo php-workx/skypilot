@@ -1,6 +1,9 @@
 """Cudo Compute"""
+import asyncio
+import contextlib
 import importlib
 import subprocess
+import sys
 import typing
 from typing import cast, Dict, Iterator, List, Optional, Tuple, Type, Union
 
@@ -21,8 +24,45 @@ _CREDENTIAL_FILES = [
 ]
 
 
+def _ensure_asyncio_timeout_support() -> None:
+    """Backfills asyncio.timeout for Python < 3.11 environments."""
+    if sys.version_info >= (3, 11) or hasattr(asyncio, 'timeout'):
+        return
+
+    @contextlib.asynccontextmanager
+    async def _timeout(delay: Optional[float]) -> typing.AsyncIterator[None]:
+        if delay is None:
+            yield
+            return
+
+        loop = asyncio.get_running_loop()
+        task = asyncio.current_task()
+        if task is None:
+            raise RuntimeError('asyncio.timeout requires a running task.')
+
+        timed_out = False
+
+        def _on_timeout() -> None:
+            nonlocal timed_out
+            timed_out = True
+            task.cancel()
+
+        handle = loop.call_later(delay, _on_timeout)
+        try:
+            yield
+        except asyncio.CancelledError as exc:
+            if timed_out:
+                raise asyncio.TimeoutError() from exc
+            raise
+        finally:
+            handle.cancel()
+
+    setattr(asyncio, 'timeout', _timeout)
+
+
 def _load_cudo_api_module() -> Tuple[typing.Any, Type[Exception]]:
     """Returns the Cudo API module and its ApiException."""
+    _ensure_asyncio_timeout_support()
     errors: List[BaseException] = []
     candidates = (
         ('cudo_compute.cudo_api', 'cudo_compute.rest'),
