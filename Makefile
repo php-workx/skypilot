@@ -13,8 +13,8 @@ all: help ## Alias for help (conventional)
 test: test-local ## Alias for test-local (conventional)
 
 # Python and environment settings
-PYTHON_VERSION := 3.10
-VENV_DIR := .venv
+PYTHON_VERSION := 3.11
+VENV_DIR := /opt/conda/
 PYTHON := $(VENV_DIR)/bin/python
 PYTEST := $(VENV_DIR)/bin/pytest
 UV := uv
@@ -36,17 +36,13 @@ help: ## Display this help message
 
 install: ## Install dependencies using uv (creates venv if needed)
 	@echo "📦 Installing SkyPilot with dependencies..."
-	@if [ ! -d "$(VENV_DIR)" ]; then \
-		echo "Creating virtual environment ..."; \
-		$(UV) venv --python $(PYTHON_VERSION) $(VENV_DIR); \
-	fi
 	@echo "Installing Azure CLI (with pre-release workaround)..."
-	@$(UV) pip install --prerelease=allow "azure-cli>=2.65.0" --python $(PYTHON)
+	@$(UV) pip install --prerelease=allow "azure-cli>=2.65.0" --system
 	@echo "Installing SkyPilot in editable mode..."
-	@$(UV) pip install -e ".[all]" --python $(PYTHON)
+	@$(UV) pip install -e ".[all]" --system
 	@echo "Installing dev dependencies from requirements-dev.txt..."
-	@$(UV) pip install -r requirements-dev.txt --python $(PYTHON)
-	@echo "✅ Installation complete! Activate venv with: source $(VENV_DIR)/bin/activate"
+	@$(UV) pip install -r requirements-dev.txt --system
+	@echo "✅ Installation complete!"
 
 dev: install ## Install in development mode (alias for install)
 
