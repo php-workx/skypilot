@@ -3,7 +3,7 @@ name: Test Container Build
 on:
   pull_request:
     branches:
-      - ojin-pre-release
+      - ojin-release
 
 jobs:
   build-test:

@@ -1,317 +1,148 @@
-# SkyPilot Fork - Development Workflow
+# SkyPilot Fork – Development Workflow
 
-**Simple, clean workflow with two main branches and feature branches for PRs**
+**Single release branch with short-lived feature branches**
 
 ---
 
 ## Branch Structure
 
 ```
-ojin-release              ← Stable, production-ready (GitHub default)
-├── Receives: PRs from ojin-pre-release or feature branches
-└── Tagged: After significant releases
+ojin-release            ← Default branch; always releasable
+├── Receives: PRs from feature/* or hotfix/* branches
+└── Tagged: Automatically per merge (container + git tags)
 
-ojin-pre-release         ← Active development branch
-├── Receives: Direct commits, merges from feature branches
-└── Merges to: ojin-release via PR when stable
-
-feature/your-feature     ← Short-lived PR branches
-├── Created from: ojin-pre-release or ojin-release
-└── Merges to: ojin-pre-release via PR/squash merge
+feature/your-feature    ← Short-lived development branches
+├── Created from: ojin-release
+└── Merges to: ojin-release via PR/squash merge
 ```
 
 ---
 
-## Daily Development Workflows
+## Daily Development Flow
 
-### Workflow 1: Quick Development (No PR)
-
-For small changes, quick iterations:
+Keep `ojin-release` clean by merging through PRs—even for fast fixes—so code review, CI, and the automated release tagging stay consistent.
 
 ```bash
-# Work directly on ojin-pre-release
-git checkout ojin-pre-release
-git pull origin ojin-pre-release
-
-# Make changes
-vim sky/catalog/new_feature.py
-git add .
-git commit -m "Add feature X"
-
-# Push
-git push origin ojin-pre-release
-```
-
-### Workflow 2: Feature Branch Development (With PR)
-
-For larger features that need review:
-
-```bash
-# 1. Create feature branch from ojin-pre-release
-git checkout ojin-pre-release
-git pull origin ojin-pre-release
-git checkout -b feature/add-lambda-support
-
-# 2. Develop your feature
-vim sky/catalog/lambda_fetcher.py
-git add .
-git commit -m "Add Lambda catalog fetcher"
-
-# 3. Push feature branch
-git push -u origin feature/add-lambda-support
-
-# 4. Create PR on GitHub
-# Base: ojin-pre-release
-# Compare: feature/add-lambda-support
-
-# 5. After review and merge, clean up
-git checkout ojin-pre-release
-git pull origin ojin-pre-release
-git branch -d feature/add-lambda-support
-git push origin --delete feature/add-lambda-support
-```
-
-### Workflow 3: Promote to Production
-
-When ojin-pre-release is stable and tested:
-
-```bash
-# Option A: Create PR (Recommended)
-# Go to GitHub, create PR:
-# Base: ojin-release
-# Compare: ojin-pre-release
-# Review changes, then merge
-
-# Option B: Direct merge
 git checkout ojin-release
 git pull origin ojin-release
-git merge ojin-pre-release
-git push origin ojin-release
+git checkout -b feature/add-lambda-support
 
-# Tag the release
-git tag v0.10.3-ojin-custom.1
-git push origin v0.10.3-ojin-custom.1
+# develop...
+git commit -am "Add Lambda catalog fetcher"
+git push -u origin feature/add-lambda-support
 ```
 
----
+Open a PR to `ojin-release`. After merging, delete the feature branch locally and remotely.
 
-## Upgrading to New SkyPilot Release
-
-When SkyPilot releases a new version (e.g., v0.10.4):
+### Hotfixing Production
 
 ```bash
-# Run the upgrade script
-./upgrade-to-release.sh
+# Branch directly from ojin-release
+git checkout ojin-release
+git pull
+git checkout -b hotfix/critical-bug
 
-# Script will:
-# 1. Rebase ojin-release onto v0.10.4
-# 2. Rebase ojin-pre-release onto v0.10.4
-# 3. Tag ojin-base-v0.10.4
-
-# Then you:
-# 1. Test thoroughly
-# 2. Push both branches
-git push origin ojin-release --force
-git push origin ojin-pre-release --force
-git push origin ojin-base-v0.10.4
-
-# 3. Tag the new release
-git tag v0.10.4-ojin-custom
-git push origin v0.10.4-ojin-custom
+# fix...
+git commit -am "Fix critical bug"
+git push -u origin hotfix/critical-bug
+# PR back into ojin-release
 ```
 
-**The script automatically rebases ALL your custom commits - no cherry-picking needed!**
+Because `ojin-release` is the deployment branch, the merged hotfix becomes the next container/git tag automatically.
 
 ---
 
-## Visual Workflow Diagram
+## Release Process
+
+`ojin-release` is the only long-lived branch. Every merge triggers CI, builds the Docker image, and produces a tag with the format:
+
+```
+{SKYPILOT_BASE_VERSION}-ojin.{YYYYMMDD}.{N}
+```
+
+where:
+
+- `SKYPILOT_BASE_VERSION` is defined in `.github/workflows/publish-to-ecr.yml`
+- `YYYYMMDD` is the UTC date of the build
+- `N` increments per day
+
+Both the container image and the Git repo receive the same tag—no `latest` tag is published.
+
+---
+
+## Upgrading to a New SkyPilot Release
+
+Use the upgrade script to rebase your fork onto the latest upstream version:
+
+```bash
+./upgrade-to-release.sh
+```
+
+The script:
+
+1. Rebases `ojin-release` onto the chosen upstream tag
+2. Creates/updates the `ojin-base-{upstream-tag}` marker tag
+
+After it finishes:
+
+```bash
+# Run tests, validate everything
+git push origin ojin-release --force-with-lease  # only if rebase changes history
+git push origin ojin-base-v0.10.4
+```
+
+Then merge new work as usual; the GitHub Actions workflow continues tagging images off `ojin-release`.
+
+---
+
+## Visual Reference
 
 ```
 Upstream SkyPilot:
   v0.10.3 ──→ v0.10.4 ──→ v0.11.0
 
-Your Fork:
+Your fork:
 
-┌─────────────────────────────────────────────┐
-│ ojin-release (stable)                       │
-│   v0.10.3                                   │
-│     ├── Custom: RunPod fetcher              │
-│     └── Custom: Catalog URLs                │
-│                                             │
-│   (upgrade via script)                      │
-│   ↓                                         │
-│   v0.10.4                                   │
-│     ├── Custom: RunPod fetcher (rebased)    │
-│     └── Custom: Catalog URLs (rebased)      │
-└─────────────────────────────────────────────┘
-                    ↑
-                    │ PR when stable
-                    │
-┌─────────────────────────────────────────────┐
-│ ojin-pre-release (development)              │
-│   v0.10.3                                   │
-│     ├── Custom: RunPod fetcher              │
-│     ├── Custom: Catalog URLs                │
-│     └── New: Lambda support (in dev)        │
-│                                             │
-│   (upgrade via script)                      │
-│   ↓                                         │
-│   v0.10.4                                   │
-│     ├── All features rebased                │
-│     └── Continue development                │
-└─────────────────────────────────────────────┘
-                    ↑
-                    │ PR or direct commit
-                    │
-┌─────────────────────────────────────────────┐
-│ feature/add-lambda (short-lived)            │
-│     └── New: Lambda support                 │
-└─────────────────────────────────────────────┘
+┌────────────────────────────────────────┐
+│ ojin-release (default)                 │
+│   v0.10.3 + custom patches             │
+│     ├── Merge feature/add-lambda       │
+│     └── Merge hotfix/fix-xyz           │
+│                                        │
+│ (upgrade via script)                   │
+│   ↓                                    │
+│  v0.10.4 + rebased patches             │
+└────────────────────────────────────────┘
+        ↑
+        │ PRs from feature/hotfix branches
+        │
+┌────────────────────────────────────────┐
+│ feature/add-lambda (short-lived)       │
+└────────────────────────────────────────┘
 ```
-
----
-
-## Branch Purposes
-
-| Branch | Purpose | Stability | Push Direct? | PR Target |
-|--------|---------|-----------|--------------|-----------|
-| **ojin-release** | Production | Stable | No | - |
-| **ojin-pre-release** | Development | Testing | Yes | ojin-release |
-| **feature/\*** | Feature dev | Unstable | Yes | ojin-pre-release |
-
----
-
-## Release Versioning
-
-```
-v{UPSTREAM_VERSION}-ojin-custom.{INCREMENT}
-
-Examples:
-v0.10.3-ojin-custom        ← First release on v0.10.3
-v0.10.3-ojin-custom.1      ← More explicit first release
-v0.10.3-ojin-custom.2      ← Second release (added features)
-v0.10.4-ojin-custom        ← Upgraded to v0.10.4
-```
-
----
-
-## Common Tasks
-
-### Start New Feature
-```bash
-git checkout ojin-pre-release
-git pull
-git checkout -b feature/my-feature
-```
-
-### Commit to Pre-Release
-```bash
-git checkout ojin-pre-release
-# make changes
-git commit -m "Add feature"
-git push
-```
-
-### Promote to Release
-```bash
-# Create PR: ojin-release ← ojin-pre-release
-# Or:
-git checkout ojin-release
-git merge ojin-pre-release
-git push
-git tag v0.10.3-ojin-custom.X
-git push --tags
-```
-
-### Upgrade Upstream
-```bash
-./upgrade-to-release.sh
-# Follow prompts
-# Test
-# Push
-```
-
-### Hotfix on Release
-```bash
-git checkout ojin-release
-git checkout -b hotfix/critical-bug
-# fix bug
-git commit -m "Fix critical bug"
-
-# Create PR: ojin-release ← hotfix/critical-bug
-# After merge:
-git checkout ojin-pre-release
-git merge ojin-release  # Pull hotfix into pre-release
-```
-
----
-
-## Advantages of This Workflow
-
-### 1. Clear Separation
-- **ojin-release**: Always stable, production-ready
-- **ojin-pre-release**: Active development, may be unstable
-- **feature/\***: Isolated changes, easy to review
-
-### 2. Flexible Development
-- Quick changes: Direct to ojin-pre-release
-- Large features: Feature branch → PR
-- Both paths work smoothly
-
-### 3. Safe Upgrades
-- Script rebases both branches automatically
-- Both branches stay in sync
-- No manual cherry-picking
-
-### 4. Easy Rollback
-```bash
-# Rollback release
-git checkout ojin-release
-git reset --hard v0.10.3-ojin-custom.1
-
-# Rollback pre-release
-git checkout ojin-pre-release
-git reset --hard origin/ojin-pre-release
-```
-
-### 5. Team-Ready
-- Multiple developers can work on feature branches
-- PR reviews for quality control
-- Clear release process
-
----
-
-## Best Practices
-
-1. **Always branch from ojin-pre-release** for features
-2. **Test on ojin-pre-release** before promoting to release
-3. **Tag ojin-release** after significant updates
-4. **Keep feature branches small** - easier to review
-5. **Delete feature branches** after merging
-6. **Use the upgrade script** - don't manually rebase
 
 ---
 
 ## Quick Reference
 
-| Task | Command |
-|------|---------|
-| New feature branch | `git checkout -b feature/name ojin-pre-release` |
-| Quick commit | `git checkout ojin-pre-release && git commit` |
-| Promote to release | PR: ojin-release ← ojin-pre-release |
-| Upgrade upstream | `./upgrade-to-release.sh` |
-| Tag release | `git tag v0.X.Y-ojin-custom.Z` |
+| Task                  | Command |
+|-----------------------|---------|
+| Sync local repo       | `git checkout ojin-release && git pull` |
+| New feature branch    | `git checkout -b feature/name ojin-release` |
+| Merge via PR          | Base `ojin-release`, compare `feature/name` |
+| Upgrade upstream      | `./upgrade-to-release.sh` |
+| Tagging               | Handled automatically by CI |
 
 ---
 
-## Summary
+## Best Practices
 
-- **Two main branches**: ojin-release (stable), ojin-pre-release (development)
-- **Feature branches**: For reviewed development
-- **Upgrade script**: Automatically rebases both branches
-- **No cherry-picking**: Git handles everything
-- **Clean and simple**: Easy to understand and maintain
+1. Keep `ojin-release` green—run tests and review before merging.
+2. Delete feature branches after merging to avoid clutter.
+3. When upgrading upstream, close all open PRs or rebase them afterwards.
+4. Bump `SKYPILOT_BASE_VERSION` in the workflow when adopting a new upstream release so tags stay accurate.
+5. Because no `latest` tag exists, always reference an explicit version in deployments.
 
 ---
 
-**Ready to develop!** 🚀
+Happy coding! 🚀

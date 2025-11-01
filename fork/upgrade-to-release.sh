@@ -1,6 +1,6 @@
 #!/bin/bash
 # SkyPilot Fork Upgrade Script
-# Upgrades ojin-release and ojin-pre-release to a new upstream release
+# Upgrades ojin-release to a new upstream release
 
 set -e  # Exit on error
 
@@ -52,14 +52,13 @@ echo
 echo -e "${GREEN}╔════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║  Upgrade Plan                          ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
-echo -e "${BLUE}From:${NC} ${YELLOW}${OLD_VERSION}${NC}"
-echo -e "${BLUE}To:${NC}   ${YELLOW}${NEW_VERSION}${NC}"
+echo -e "${BLUE}Branch:${NC} ${YELLOW}ojin-release${NC}"
+echo -e "${BLUE}From:${NC}   ${YELLOW}${OLD_VERSION}${NC}"
+echo -e "${BLUE}To:${NC}     ${YELLOW}${NEW_VERSION}${NC}"
 echo
 echo "Steps:"
 echo "  1. Rebase ojin-release onto ${NEW_VERSION}"
-echo "  2. Rebase ojin-pre-release onto ${NEW_VERSION}"
-echo "  3. Tag new base as ojin-base-${NEW_VERSION}"
-echo "  4. Push both branches and tag"
+echo "  2. Tag new base as ojin-base-${NEW_VERSION}"
 echo
 
 read -p "$(echo -e ${YELLOW}Continue? \(y/n\): ${NC})" -n 1 -r
@@ -98,34 +97,7 @@ fi
 
 echo
 echo -e "${GREEN}═══════════════════════════════════════${NC}"
-echo -e "${GREEN}Step 2: Rebasing ojin-pre-release${NC}"
-echo -e "${GREEN}═══════════════════════════════════════${NC}"
-
-git checkout ojin-pre-release
-echo -e "${BLUE}Current branch:${NC} ojin-pre-release"
-echo -e "${BLUE}Rebasing from:${NC} ${OLD_VERSION}"
-echo -e "${BLUE}Rebasing onto:${NC} ${NEW_VERSION}"
-echo
-
-if git rebase --onto "$NEW_VERSION" "$OLD_VERSION"; then
-    echo -e "${GREEN}✓ ojin-pre-release rebased successfully${NC}"
-else
-    echo -e "${RED}✗ Rebase failed or has conflicts${NC}"
-    echo
-    echo "To resolve:"
-    echo "  1. Fix conflicts in the files"
-    echo "  2. git add <resolved-files>"
-    echo "  3. git rebase --continue"
-    echo "  4. Re-run this script"
-    echo
-    echo "To abort:"
-    echo "  git rebase --abort"
-    exit 1
-fi
-
-echo
-echo -e "${GREEN}═══════════════════════════════════════${NC}"
-echo -e "${GREEN}Step 3: Tagging new base${NC}"
+echo -e "${GREEN}Step 2: Tagging new base${NC}"
 echo -e "${GREEN}═══════════════════════════════════════${NC}"
 
 git tag -f "ojin-base-$NEW_VERSION" "$NEW_VERSION"
@@ -136,9 +108,8 @@ echo -e "${GREEN}╔════════════════════
 echo -e "${GREEN}║  ✓ Upgrade Complete!                   ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════╝${NC}"
 echo
-echo -e "${BLUE}Branches updated:${NC}"
+echo -e "${BLUE}Branch updated:${NC}"
 echo "  • ojin-release      → ${NEW_VERSION}"
-echo "  • ojin-pre-release  → ${NEW_VERSION}"
 echo
 echo -e "${YELLOW}═══════════════════════════════════════${NC}"
 echo -e "${YELLOW}Next Steps:${NC}"
@@ -149,8 +120,7 @@ echo "   • Run your tests"
 echo "   • Verify custom features work"
 echo
 echo "2. ${BLUE}Push changes:${NC}"
-echo "   git push origin ojin-release --force"
-echo "   git push origin ojin-pre-release --force"
+echo "   git push origin ojin-release --force-with-lease"
 echo "   git push origin ojin-base-${NEW_VERSION}"
 echo
 echo "3. ${BLUE}Tag the release:${NC}"
@@ -163,6 +133,5 @@ echo
 echo -e "${BLUE}To rollback if needed:${NC}"
 echo "  git checkout ojin-release"
 echo "  git reset --hard origin/ojin-release"
-echo "  git checkout ojin-pre-release"
-echo "  git reset --hard origin/ojin-pre-release"
+echo
 echo
