@@ -3,8 +3,7 @@ name: format
 on:
   pull_request:
     branches:
-      - ojin-pre-release
-      - ojin-releases
+      - ojin-release
 
 jobs:
   format:

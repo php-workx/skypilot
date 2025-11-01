@@ -70,7 +70,7 @@ install_requires = [
     # Required for API server metrics
     'prometheus_client>=0.8.0',
     'passlib',
-    'bcrypt',
+    'bcrypt==4.0.1',  # passlib compatibility (bcrypt 4.1.0+ breaks passlib)
     'pyjwt',
     'gitpython',
     'types-paramiko',
@@ -184,7 +184,7 @@ extras_require: Dict[str, List[str]] = {
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
     'runpod': ['runpod>=1.6.1'],
     'fluidstack': [],  # No dependencies needed for fluidstack
-    'cudo': ['cudo-compute>=0.1.10'],
+    'cudo': ['cudo-compute>=0.3.6'],
     'paperspace': [],  # No dependencies needed for paperspace
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
     'vast': ['vastai-sdk>=0.1.12'],
