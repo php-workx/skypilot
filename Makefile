@@ -13,7 +13,7 @@ all: help ## Alias for help (conventional)
 test: test-local ## Alias for test-local (conventional)
 
 # Python and environment settings
-PYTHON_VERSION := 3.11
+PYTHON_VERSION := 3.10
 VENV_DIR := .venv
 PYTHON := $(VENV_DIR)/bin/python
 PYTEST := $(VENV_DIR)/bin/pytest

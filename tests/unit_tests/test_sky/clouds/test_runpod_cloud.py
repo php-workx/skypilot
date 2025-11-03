@@ -44,9 +44,9 @@ class TestRunPodRegionsWithOffering:
 
         # Verify catalog was queried with accelerator
         mock_get_acc_regions.assert_called_once_with('RTX5090',
-                                                      1,
-                                                      False,
-                                                      clouds='runpod')
+                                                     1,
+                                                     False,
+                                                     clouds='runpod')
 
         # Verify result contains filtered zone
         assert len(result) == 1
@@ -55,8 +55,7 @@ class TestRunPodRegionsWithOffering:
         assert result[0].zones[0].name == 'US-IL-1'
 
     @mock.patch('sky.catalog.get_region_zones_for_instance_type')
-    def test_instance_type_only_backward_compatible(
-            self, mock_get_vm_regions):
+    def test_instance_type_only_backward_compatible(self, mock_get_vm_regions):
         """Test with only instance_type (no accelerator).
 
         This should still work as before - regression test.
@@ -71,8 +70,8 @@ class TestRunPodRegionsWithOffering:
             zone='US-IL-1')
 
         # Verify catalog was queried with instance_type
-        mock_get_vm_regions.assert_called_once_with('1x_RTX5090_SECURE',
-                                                     False, 'runpod')
+        mock_get_vm_regions.assert_called_once_with('1x_RTX5090_SECURE', False,
+                                                    'runpod')
 
         # Verify result
         assert len(result) == 1
@@ -81,7 +80,7 @@ class TestRunPodRegionsWithOffering:
     @mock.patch('sky.catalog.get_region_zones_for_accelerators')
     @mock.patch('sky.catalog.get_region_zones_for_instance_type')
     def test_both_specified_returns_intersection(self, mock_get_vm_regions,
-                                                  mock_get_acc_regions):
+                                                 mock_get_acc_regions):
         """Test with both instance_type and accelerator.
 
         Should return intersection of regions/zones that support both.
@@ -112,11 +111,11 @@ class TestRunPodRegionsWithOffering:
 
         # Verify both catalogs were queried
         mock_get_acc_regions.assert_called_once_with('RTX5090',
-                                                      1,
-                                                      False,
-                                                      clouds='runpod')
-        mock_get_vm_regions.assert_called_once_with('1x_RTX5090_SECURE',
-                                                     False, 'runpod')
+                                                     1,
+                                                     False,
+                                                     clouds='runpod')
+        mock_get_vm_regions.assert_called_once_with('1x_RTX5090_SECURE', False,
+                                                    'runpod')
 
         # Verify result - should only have US-IL-1 (intersection)
         assert len(result) == 1
@@ -215,7 +214,8 @@ class TestRunPodCredentials:
         assert valid is False
         assert 'not a valid TOML file' in reason
 
-    @mock.patch('builtins.open', mock.mock_open(read_data=b'[other]\nkey = "value"'))
+    @mock.patch('builtins.open',
+                mock.mock_open(read_data=b'[other]\nkey = "value"'))
     @mock.patch('os.path.exists', return_value=True)
     def test_missing_default_profile(self, mock_exists):
         """Test when default profile is missing."""
@@ -235,7 +235,8 @@ class TestRunPodCredentials:
         assert 'missing api_key' in reason
 
     @mock.patch('builtins.open',
-                mock.mock_open(read_data=b'[default]\napi_key = "test-key-123"'))
+                mock.mock_open(read_data=b'[default]\napi_key = "test-key-123"')
+               )
     @mock.patch('os.path.exists', return_value=True)
     def test_valid_credentials(self, mock_exists):
         """Test with valid credentials."""
@@ -346,8 +347,7 @@ class TestRunPodInstanceTypeParsing:
 
     def test_parse_invalid_format_too_few_parts(self):
         """Test parsing invalid format (too few parts)."""
-        result = runpod_mod.RunPod._parse_instance_type_for_availability(
-            '1x')
+        result = runpod_mod.RunPod._parse_instance_type_for_availability('1x')
 
         assert result is None
 
@@ -359,7 +359,8 @@ class TestRunPodAvailabilityCheck:
     def mock_resources(self):
         """Create mock resources for testing."""
         # Create mock with spec_set to avoid assert_* special handling
-        resources = mock.Mock(spec=['instance_type', 'region', 'assert_launchable'])
+        resources = mock.Mock(
+            spec=['instance_type', 'region', 'assert_launchable'])
         resources.instance_type = '1x_RTX5090_SECURE'
         resources.region = 'US-CA-1'
         resources.assert_launchable = mock.Mock(return_value=resources)
@@ -431,7 +432,9 @@ class TestRunPodAvailabilityCheck:
     def test_graphql_error_returns_true(self, mock_graphql, mock_resources):
         """Test that GraphQL errors fail open (return True)."""
         mock_graphql.return_value = {
-            'errors': [{'message': 'Some GraphQL error'}]
+            'errors': [{
+                'message': 'Some GraphQL error'
+            }]
         }
 
         result = runpod_mod.RunPod.check_quota_available(mock_resources)
@@ -450,11 +453,7 @@ class TestRunPodAvailabilityCheck:
     @mock.patch('runpod.api.graphql.run_graphql_query')
     def test_empty_gpu_types_returns_true(self, mock_graphql, mock_resources):
         """Test that empty gpuTypes list fails open (return True)."""
-        mock_graphql.return_value = {
-            'data': {
-                'gpuTypes': []
-            }
-        }
+        mock_graphql.return_value = {'data': {'gpuTypes': []}}
 
         result = runpod_mod.RunPod.check_quota_available(mock_resources)
 
@@ -463,7 +462,8 @@ class TestRunPodAvailabilityCheck:
     def test_unparseable_instance_type_returns_true(self):
         """Test that unparseable instance types fail open (return True)."""
         # Create mock with spec to avoid assert_* special handling
-        resources = mock.Mock(spec=['instance_type', 'region', 'assert_launchable'])
+        resources = mock.Mock(
+            spec=['instance_type', 'region', 'assert_launchable'])
         resources.instance_type = 'invalid_format'
         resources.region = 'US-CA-1'
         resources.assert_launchable = mock.Mock(return_value=resources)
@@ -471,3 +471,91 @@ class TestRunPodAvailabilityCheck:
         result = runpod_mod.RunPod.check_quota_available(resources)
 
         assert result is True  # Fail open when can't parse instance type
+
+
+class TestRunPodGpuIdMapping:
+    """Test GPU ID mapping from SkyPilot names to RunPod names."""
+
+    def test_rtx_gpu_mapping(self):
+        """Test RTX consumer GPU name mapping."""
+        assert runpod_mod.RunPod._get_runpod_gpu_id(
+            'RTX5090') == 'NVIDIA GeForce RTX 5090'
+        assert runpod_mod.RunPod._get_runpod_gpu_id(
+            'RTX4090') == 'NVIDIA GeForce RTX 4090'
+        assert runpod_mod.RunPod._get_runpod_gpu_id(
+            'RTX3090') == 'NVIDIA GeForce RTX 3090'
+
+    def test_datacenter_gpu_mapping(self):
+        """Test datacenter GPU name mapping."""
+        assert runpod_mod.RunPod._get_runpod_gpu_id(
+            'A100-80GB-SXM') == 'NVIDIA A100-SXM4-80GB'
+        assert runpod_mod.RunPod._get_runpod_gpu_id(
+            'A100-80GB') == 'NVIDIA A100 80GB PCIe'
+        assert runpod_mod.RunPod._get_runpod_gpu_id(
+            'H100') == 'NVIDIA H100 PCIe'
+        assert runpod_mod.RunPod._get_runpod_gpu_id(
+            'H100-SXM') == 'NVIDIA H100 80GB HBM3'
+
+    def test_amd_gpu_mapping(self):
+        """Test AMD GPU name mapping."""
+        assert runpod_mod.RunPod._get_runpod_gpu_id(
+            'MI300X') == 'AMD Instinct MI300X OAM'
+
+    def test_unknown_gpu_returns_none(self):
+        """Test that unknown GPU names return None."""
+        assert runpod_mod.RunPod._get_runpod_gpu_id('UNKNOWN_GPU') is None
+        assert runpod_mod.RunPod._get_runpod_gpu_id('FAKE-GPU') is None
+
+    @mock.patch('runpod.api.graphql.run_graphql_query')
+    def test_availability_check_with_gpu_mapping(self, mock_graphql):
+        """Test that availability check uses GPU ID mapping correctly."""
+        # Setup: Mock GraphQL to return stock available
+        mock_graphql.return_value = {
+            'data': {
+                'gpuTypes': [{
+                    'lowestPrice': {
+                        'stockStatus': 'High',
+                        'availableGpuCounts': [1, 2, 4, 8]
+                    }
+                }]
+            }
+        }
+
+        # Create mock resources for RTX4090
+        resources = mock.Mock(
+            spec=['instance_type', 'region', 'assert_launchable'])
+        resources.instance_type = '1x_RTX4090_SECURE'
+        resources.region = 'US-CA-1'
+        resources.assert_launchable = mock.Mock(return_value=resources)
+
+        # Execute
+        result = runpod_mod.RunPod.check_quota_available(resources)
+
+        # Verify: Should query with full RunPod GPU name, not SkyPilot name
+        mock_graphql.assert_called_once()
+        query = mock_graphql.call_args[0][0]
+
+        # The query should contain the full RunPod GPU ID, not the short name
+        assert 'NVIDIA GeForce RTX 4090' in query
+        assert 'RTX4090' not in query  # Short name should NOT be in query
+
+        assert result is True
+
+    @mock.patch('runpod.api.graphql.run_graphql_query')
+    def test_unknown_gpu_fails_open(self, mock_graphql):
+        """Test that unknown GPUs (not in mapping) fail open without querying API."""
+        # Create mock resources with unknown GPU
+        resources = mock.Mock(
+            spec=['instance_type', 'region', 'assert_launchable'])
+        resources.instance_type = '1x_UNKNOWN_GPU_SECURE'
+        resources.region = 'US-CA-1'
+        resources.assert_launchable = mock.Mock(return_value=resources)
+
+        # Execute
+        result = runpod_mod.RunPod.check_quota_available(resources)
+
+        # Verify: Should NOT query API (GPU not in mapping)
+        mock_graphql.assert_not_called()
+
+        # Should fail open (return True)
+        assert result is True
