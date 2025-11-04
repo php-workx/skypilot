@@ -2,13 +2,10 @@
 
 ## Availability-Aware Catalog Fetchers
 
-### Overview
 Enhanced catalog fetchers to only include cloud resources that are actually available, preventing SkyPilot from wasting time attempting to provision unavailable GPU instances.
 
-### Implementation Pattern
 - Default: Filter to only available resources
 - CLI flag: `--no-filter-available` to fall back to all regions/resources
-
 
 ## Custom Catalog URL Support (`feature/custom-catalog-urls` branch)
 
