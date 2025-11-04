@@ -355,6 +355,17 @@ class TestRunPodInstanceTypeParsing:
 class TestRunPodAvailabilityCheck:
     """Test RunPod availability checking via check_quota_available."""
 
+    @pytest.fixture(autouse=True)
+    def clear_cache(self):
+        """Clear the LRU cache before each test to prevent cache pollution."""
+        # Clear the cache on _check_runpod_stock_cached to ensure fresh results
+        if hasattr(runpod_mod.RunPod._check_runpod_stock_cached, 'cache_clear'):
+            runpod_mod.RunPod._check_runpod_stock_cached.cache_clear()
+        yield
+        # Clear again after test
+        if hasattr(runpod_mod.RunPod._check_runpod_stock_cached, 'cache_clear'):
+            runpod_mod.RunPod._check_runpod_stock_cached.cache_clear()
+
     @pytest.fixture
     def mock_resources(self):
         """Create mock resources for testing."""

@@ -718,7 +718,7 @@ Troubleshooting
 
 * **Authentication fails:** ensure ``api_key`` is configured correctly.
 * **SSH access denied:** confirm your public key is added to Seeweb before launching servers; otherwise retrieve the one-time root password from the Seeweb panel.
-* **Instance type unavailable:** not all plans exist in every region. Either specify a region that supports the plan or let SkyPilot auto‑select.
+* **Instance type unavailable:** not all plans exist in every region. Either specify a region that supports the plan or let SkyPilot auto-select.
 
 See also
 ^^^^^^^^^^^^^^^^^^^^^
