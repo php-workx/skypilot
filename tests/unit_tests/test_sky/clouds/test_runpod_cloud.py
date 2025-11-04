@@ -372,7 +372,7 @@ class TestRunPodAvailabilityCheck:
         mock_graphql.return_value = {
             'data': {
                 'gpuTypes': [{
-                    'id': 'RTX5090',
+                    'id': 'NVIDIA GeForce RTX 5090',  # Full RunPod GPU ID
                     'displayName': 'RTX 5090',
                     'lowestPrice': {
                         'stockStatus': 'High',
@@ -392,7 +392,7 @@ class TestRunPodAvailabilityCheck:
         mock_graphql.return_value = {
             'data': {
                 'gpuTypes': [{
-                    'id': 'RTX5090',
+                    'id': 'NVIDIA GeForce RTX 5090',  # Full RunPod GPU ID
                     'displayName': 'RTX 5090',
                     'lowestPrice': {
                         'stockStatus': 'None',
@@ -415,7 +415,7 @@ class TestRunPodAvailabilityCheck:
         mock_graphql.return_value = {
             'data': {
                 'gpuTypes': [{
-                    'id': 'RTX5090',
+                    'id': 'NVIDIA GeForce RTX 5090',  # Full RunPod GPU ID
                     'lowestPrice': {
                         'stockStatus': 'Low',
                         'availableGpuCounts': [1, 2]  # 4 not in list

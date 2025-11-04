@@ -42,14 +42,17 @@ class TestWorkspaceManagement(unittest.TestCase):
         import shutil
         shutil.rmtree(self.temp_dir)
 
+    @mock.patch('sky.skypilot_config._resolve_server_config_path')
     @mock.patch('sky.skypilot_config.get_user_config_path')
     @mock.patch('sky.skypilot_config.to_dict')
     @mock.patch('sky.utils.yaml_utils.dump_yaml')
     @mock.patch('sky.skypilot_config.reload_config')
     def test_internal_update_workspaces_config(self, mock_reload_config,
                                                mock_dump_yaml, mock_to_dict,
-                                               mock_get_path):
+                                               mock_get_path,
+                                               mock_resolve_path):
         """Test the internal helper for updating workspaces configuration."""
+        mock_resolve_path.return_value = None  # Force fallback to get_user_config_path
         mock_get_path.return_value = self.config_path
         mock_to_dict.return_value = self.sample_config.copy()
 
