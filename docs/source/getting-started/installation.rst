@@ -79,7 +79,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
           # Seeweb is only supported for Python >= 3.10
-          pip install "skypilot[seeweb]"
+          pip install "skypilot-nightly[seeweb]"
           pip install "skypilot-nightly[primeintellect]"
 
           pip install "skypilot-nightly[all]"

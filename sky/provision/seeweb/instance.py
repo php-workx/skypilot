@@ -146,8 +146,6 @@ class SeewebNodeProvider:
     def terminate_instances(self) -> None:
         for srv in self._query_cluster_nodes():
             logger.info('Deleting server %s …', srv.name)
-            self.ecs.delete_server(srv.name)  # DELETE /servers/{name}
-
             # Retry deletion with exponential backoff
             # to handle transient API errors
             common_utils.retry(self.ecs.delete_server,
@@ -600,6 +598,11 @@ def wait_instances(
             if s.notes and s.notes.startswith(cluster_name_on_cloud)
         ]
         if not cluster_nodes:
+            # If we're waiting for 'Terminated' state and cluster is gone,
+            # termination is complete - return immediately
+            if seeweb_state == 'Terminated':
+                return
+            # Otherwise, cluster may not be created yet - keep waiting
             time.sleep(_POLL_INTERVAL)
             continue
 
