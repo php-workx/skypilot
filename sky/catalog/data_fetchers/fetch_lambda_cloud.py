@@ -70,7 +70,16 @@ def name_to_gpu_and_cnt(name: str) -> Optional[Tuple[str, int]]:
     return gpu, gpu_cnt
 
 
-def create_catalog(api_key: str, output_path: str) -> None:
+def create_catalog(api_key: str,
+                   output_path: str,
+                   filter_available: bool = True) -> None:
+    """Create Lambda Cloud catalog by fetching data from API.
+
+    Args:
+        api_key: Lambda Cloud API key
+        output_path: Path to write catalog CSV
+        filter_available: If True, only include regions with available capacity
+    """
     headers = {'Authorization': f'Bearer {api_key}'}
     response = requests.get(ENDPOINT, headers=headers)
     info = response.json()['data']
@@ -110,7 +119,28 @@ def create_catalog(api_key: str, output_path: str) -> None:
                     'TotalGpuMemoryInMiB': GPU_TO_MEMORY[gpu]
                 }
                 gpuinfo = json.dumps(gpuinfo_dict).replace('"', "'")  # pylint: disable=invalid-string-quote
-            for r in REGIONS:
+
+            # Get available regions from API response
+            if filter_available:
+                # Extract region names from regions_with_capacity_available
+                # Handle both dict and string formats
+                available_regions = info[vm].get(
+                    'regions_with_capacity_available', [])
+                regions_to_write = []
+                for r in available_regions:
+                    if isinstance(r, dict):
+                        # Dict format: extract 'name' key
+                        region_name = r.get('name')
+                        if region_name:
+                            regions_to_write.append(region_name)
+                    elif isinstance(r, str):
+                        # String format: use directly
+                        regions_to_write.append(r)
+            else:
+                # Fall back to all regions
+                regions_to_write = REGIONS
+
+            for r in regions_to_write:
                 writer.writerow(
                     [vm, gpu, gpu_cnt, vcpus, mem, price, r, gpuinfo, ''])
 
@@ -143,7 +173,15 @@ if __name__ == '__main__':
     parser.add_argument('--api-key', help='Lambda API key.')
     parser.add_argument('--api-key-path',
                         help='path of file containing Lambda API key.')
+    parser.add_argument(
+        '--no-filter-available',
+        action='store_true',
+        help='Include all regions regardless of capacity availability '
+        '(default: filter to only regions with available capacity)',
+    )
     args = parser.parse_args()
     os.makedirs('lambda', exist_ok=True)
-    create_catalog(get_api_key(args), 'lambda/vms.csv')
+    create_catalog(get_api_key(args),
+                   'lambda/vms.csv',
+                   filter_available=not args.no_filter_available)
     print('Lambda Cloud catalog saved to lambda/vms.csv')

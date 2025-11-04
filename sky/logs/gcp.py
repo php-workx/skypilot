@@ -40,6 +40,7 @@ class GCPLoggingAgent(FluentbitAgent):
 
     def __init__(self, config: Dict[str, Any]):
         self.config = _GCPLoggingConfig(**config)
+        super().__init__()
 
     def get_setup_command(self,
                           cluster_name: resources_utils.ClusterName) -> str:

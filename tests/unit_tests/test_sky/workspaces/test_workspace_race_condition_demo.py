@@ -32,6 +32,12 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
         }
         yaml_utils.dump_yaml(self.temp_config_file, self.initial_config)
 
+        # Mock _resolve_server_config_path to return None, forcing fallback to get_user_config_path
+        self.resolve_config_patcher = mock.patch(
+            'sky.skypilot_config._resolve_server_config_path',
+            return_value=None)
+        self.resolve_config_patcher.start()
+
         # Patch the config path to use our temporary file
         self.config_path_patcher = mock.patch(
             'sky.skypilot_config.get_user_config_path',
@@ -50,6 +56,7 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
 
     def tearDown(self):
         """Clean up test environment."""
+        self.resolve_config_patcher.stop()
         self.config_path_patcher.stop()
         self.to_dict_patcher.stop()
         # Clean up temp files
@@ -59,17 +66,17 @@ class TestWorkspaceRaceConditionDemo(unittest.TestCase):
 
     def test_concurrent_different_workspace_updates_no_data_loss(self):
         """Test that concurrent updates to different workspaces don't lose data.
-        
+
         This test demonstrates the race condition that would have occurred
         without proper locking:
-        
+
         1. Process A reads workspaces = {default: {...}}
-        2. Process B reads workspaces = {default: {...}}  
+        2. Process B reads workspaces = {default: {...}}
         3. Process A modifies to {default: {...}, workspace_a: {...}}
         4. Process B modifies to {default: {...}, workspace_b: {...}}
         5. Process A writes its version
         6. Process B writes its version, overwriting A's changes
-        
+
         Result without locking: Only workspace_b would exist
         Result with locking: Both workspace_a and workspace_b exist
         """

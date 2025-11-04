@@ -1,14 +1,11 @@
 # Fork Changes
 
-## RunPod Catalog Fetcher
+## Availability-Aware Catalog Fetchers
 
-### Added
-- **`sky/catalog/data_fetchers/fetch_runpod.py`** - Automated RunPod catalog data fetcher
-  - Queries RunPod API for GPU types, pricing, and availability
-- **`.github/workflows/build-push-ecr-custom.yaml`** - Custom ECR build/push workflow
+Enhanced catalog fetchers to only include cloud resources that are actually available, preventing SkyPilot from wasting time attempting to provision unavailable GPU instances.
 
-### Modified
-- **`sky/catalog/runpod_catalog.py`** - Updated to work with fetcher
+- Default: Filter to only available resources
+- CLI flag: `--no-filter-available` to fall back to all regions/resources
 
 ## Custom Catalog URL Support (`feature/custom-catalog-urls` branch)
 
@@ -16,11 +13,6 @@
 - **`sky/catalog/catalog_url_config.py`** - New module for custom catalog URL configuration
   - Support for `SKYPILOT_CATALOG_BASE_URL` (global override)
   - Support for `SKYPILOT_<CLOUD>_CATALOG_URL` (cloud-specific override, e.g., `SKYPILOT_RUNPOD_CATALOG_URL`)
-  - Hardened cloud-name parsing for edge cases
-
-### Modified
-- **`sky/catalog/common.py`** - Use `catalog_url_config` module in `_get_catalog_path()`
-- **`Dockerfile`** - Make `SKYPILOT_RUNPOD_CATALOG_URL` overridable at build time via ARG
 
 ## Development Tooling
 

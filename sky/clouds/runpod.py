@@ -7,6 +7,8 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import catalog
 from sky import clouds
+from sky.provision.runpod.utils import GPU_NAME_MAP
+from sky.utils import annotations
 from sky.utils import registry
 from sky.utils import resources_utils
 
@@ -76,9 +78,38 @@ class RunPod(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        del accelerators  # unused
-        regions = catalog.get_region_zones_for_instance_type(
-            instance_type, use_spot, 'runpod')
+        if accelerators is None:
+            regions = catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot, 'runpod')
+        else:
+            assert len(accelerators) == 1, accelerators
+            acc = list(accelerators.keys())[0]
+            acc_count = list(accelerators.values())[0]
+            acc_regions = catalog.get_region_zones_for_accelerators(
+                acc, acc_count, use_spot, clouds='runpod')
+            if instance_type is None:
+                regions = acc_regions
+            else:
+                vm_regions = catalog.get_region_zones_for_instance_type(
+                    instance_type, use_spot, 'runpod')
+                # Find the intersection between acc_regions and vm_regions
+                regions = []
+                for r1 in acc_regions:
+                    for r2 in vm_regions:
+                        if r1.name != r2.name:
+                            continue
+                        assert r1.zones is not None, r1
+                        assert r2.zones is not None, r2
+                        zones = []
+                        for z1 in r1.zones:
+                            for z2 in r2.zones:
+                                if z1.name == z2.name:
+                                    zones.append(z1)
+                                    break
+                        if zones:
+                            r1_copy = clouds.Region(r1.name)
+                            r1_copy.set_zones(zones)
+                            regions.append(r1_copy)
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -348,6 +379,196 @@ class RunPod(clouds.Cloud):
             return False, '~/.runpod/config.toml is not a valid TOML file.'
 
         return True, None
+
+    @classmethod
+    def check_quota_available(cls,
+                              resources: 'resources_lib.Resources') -> bool:
+        """Check if RunPod GPU is available in stock.
+
+        RunPod doesn't have quotas like AWS/GCP, but we can check real-time
+        stock status using their GraphQL API. This prevents wasted provisioning
+        attempts to regions that are out of stock.
+
+        Note: Results are cached per API server request to reduce API load
+        during optimization (when checking multiple regions).
+
+        Returns:
+            False if stock status is "None" or requested GPU count unavailable.
+            True otherwise (including on API errors - fail open).
+        """
+        resources = resources.assert_launchable()
+        instance_type = resources.instance_type
+
+        # Guard against None/empty instance_type (accelerator-only launch paths)
+        if not instance_type:
+            # No instance type to check, treat as available
+            return True
+
+        # Parse instance type to extract GPU info
+        # Example: "1x_RTX5090_SECURE" or "2x_H100_SXM"
+        gpu_info = cls._parse_instance_type_for_availability(instance_type)
+        if gpu_info is None:
+            # Can't parse instance type, assume available
+            return True
+
+        gpu_id = gpu_info['gpu_id']
+        gpu_count = gpu_info['gpu_count']
+
+        # Use cached query function to reduce API load
+        return cls._check_runpod_stock_cached(gpu_id, gpu_count)
+
+    @staticmethod
+    def _get_runpod_gpu_id(skypilot_gpu_name: str) -> Optional[str]:
+        """Get RunPod GPU ID from SkyPilot GPU name.
+
+        Uses the same GPU_NAME_MAP as provisioning to ensure consistency.
+
+        Args:
+            skypilot_gpu_name: GPU name in SkyPilot format (e.g., "RTX5090")
+
+        Returns:
+            RunPod GPU ID (e.g., "NVIDIA GeForce RTX 5090"),
+            or None if not found.
+
+        Examples:
+            >>> RunPod._get_runpod_gpu_id("RTX5090")
+            'NVIDIA GeForce RTX 5090'
+            >>> RunPod._get_runpod_gpu_id("A100-80GB-SXM")
+            'NVIDIA A100-SXM4-80GB'
+            >>> RunPod._get_runpod_gpu_id("UNKNOWN")
+            None
+        """
+        return GPU_NAME_MAP.get(skypilot_gpu_name)
+
+    @classmethod
+    @annotations.lru_cache(scope='request', maxsize=128)
+    def _check_runpod_stock_cached(cls, gpu_id: str, gpu_count: int) -> bool:
+        """Cached stock check for the duration of a request.
+
+        Cache scope='request' means:
+        - Cached within a single API server request (e.g., one 'sky launch')
+        - Cleared between different requests (e.g., separate 'sky launch' calls)
+        - This is ideal for optimization which checks multiple regions
+          per request
+
+        Args:
+            gpu_id: GPU identifier in SkyPilot format
+                (e.g., "RTX5090", "H100-SXM")
+            gpu_count: Number of GPUs requested
+
+        Returns:
+            False if definitively unavailable, True otherwise (fail open).
+        """
+        try:
+            from runpod.api import graphql  # pylint: disable=import-outside-toplevel  # isort:skip  # yapf: disable
+        except ImportError:
+            return True
+
+        # Convert SkyPilot GPU name to RunPod GPU ID
+        # This uses the same GPU_NAME_MAP as provisioning for consistency
+        runpod_gpu_id = cls._get_runpod_gpu_id(gpu_id)
+        if runpod_gpu_id is None:
+            # GPU not in mapping table, fail open
+            # This allows provisioning to attempt and fail with a clear error
+            return True
+
+        # Query RunPod API for stock status
+        query = f"""
+        query {{
+          gpuTypes(input: {{id: "{runpod_gpu_id}"}}) {{
+            id
+            displayName
+            lowestPrice(input: {{gpuCount: {gpu_count}}}) {{
+              stockStatus
+              availableGpuCounts
+            }}
+          }}
+        }}
+        """
+
+        try:
+            result = graphql.run_graphql_query(query)
+
+            if 'errors' in result:
+                # GraphQL errors - assume available (fail open)
+                return True
+
+            gpu_types = result.get('data', {}).get('gpuTypes', [])
+            if not gpu_types:
+                # No GPU types found - assume available (fail open)
+                return True
+
+            # Normalize lowestPrice and availableGpuCounts to handle null values
+            lowest_price = gpu_types[0].get('lowestPrice') or {}
+            stock_status = lowest_price.get('stockStatus')
+            available_counts = lowest_price.get('availableGpuCounts') or []
+
+            # Check if completely out of stock
+            if stock_status == 'None':
+                return False
+
+            # Check if requested count is available
+            # availableGpuCounts is a list like [1, 2, 4, 8]
+            if gpu_count not in available_counts:
+                return False
+
+            return True
+
+        except Exception:  # pylint: disable=broad-except
+            # On any error (network, parsing, etc.), assume available
+            # Better to try provisioning than to skip potentially
+            # available resources
+            return True
+
+    @staticmethod
+    def _parse_instance_type_for_availability(
+            instance_type: str) -> Optional[Dict[str, Union[str, int]]]:
+        """Parse RunPod instance type to extract GPU info for
+        availability checking.
+
+        Args:
+            instance_type: RunPod instance type like "1x_RTX5090_SECURE"
+
+        Returns:
+            Dict with 'gpu_id' and 'gpu_count', or None if can't parse.
+
+        Example:
+            "1x_RTX5090_SECURE" → {'gpu_id': 'RTX5090', 'gpu_count': 1}
+            "2x_H100_SXM" → {'gpu_id': 'H100-SXM', 'gpu_count': 2}
+        """
+        # RunPod instance types follow pattern: {count}x_{GPU_NAME}_{SECURITY}
+        # Examples: 1x_RTX5090_SECURE, 2x_H100_SXM, 4x_A100_80GB_SXM
+        parts = instance_type.split('_')
+
+        if len(parts) < 2:
+            return None
+
+        # First part is count (e.g., "1x", "2x")
+        count_part = parts[0]
+        if not count_part.endswith('x'):
+            return None
+
+        try:
+            count = int(count_part[:-1])
+        except ValueError:
+            return None
+
+        # GPU name is everything between count and security suffix
+        # Join with hyphens to match RunPod's GPU ID format
+        # Skip first part (count) and potentially last part
+        # if it's SECURE/COMMUNITY
+        if parts[-1] in ('SECURE', 'COMMUNITY'):
+            gpu_name_parts = parts[1:-1]
+        else:
+            gpu_name_parts = parts[1:]
+
+        if not gpu_name_parts:
+            return None
+
+        # Join with hyphens to match RunPod's GPU display name format
+        gpu_id = '-'.join(gpu_name_parts)
+
+        return {'gpu_id': gpu_id, 'gpu_count': count}
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {

@@ -396,8 +396,14 @@ def get_gpu_info(base_gpu_name: str, gpu_type: Dict[str, Any],
     }
 
 
-def get_instance_configurations(gpu_id: str) -> List[Dict]:
-    """Generate instance configurations for a GPU type."""
+def get_instance_configurations(gpu_id: str,
+                                filter_available: bool = True) -> List[Dict]:
+    """Generate instance configurations for a GPU type.
+
+    Args:
+        gpu_id: RunPod GPU ID
+        filter_available: If True, skip GPUs with no stock availability
+    """
     instances = []
     detailed_gpu_1 = get_gpu_details(gpu_id, gpu_count=1)
     base_gpu_name = format_gpu_name(detailed_gpu_1)
@@ -419,6 +425,15 @@ def get_instance_configurations(gpu_id: str) -> List[Dict]:
         # Only add secure clouds skipping community cloud instances.
         if not detailed_gpu['secureCloud']:
             continue
+
+        # Skip if availability filtering enabled and GPU has no stock
+        if filter_available:
+            # Normalize lowestPrice in case API returns null/None
+            lowest_price = detailed_gpu.get('lowestPrice') or {}
+            stock_status = lowest_price.get('stockStatus')
+            # stockStatus returns string 'None' when out of stock
+            if stock_status == 'None':
+                continue
 
         # Get basic info including memory & vcpu from the returned data
         # If memory or vpcu is not available, skip this gpu count
@@ -449,12 +464,14 @@ def get_instance_configurations(gpu_id: str) -> List[Dict]:
     return instances
 
 
-def fetch_runpod_catalog(gpu_ids: Optional[str] = None) -> pd.DataFrame:
+def fetch_runpod_catalog(gpu_ids: Optional[str] = None,
+                         filter_available: bool = True) -> pd.DataFrame:
     """Fetch and process RunPod GPU catalog data.
 
     Args:
         gpu_ids: Optional comma-separated list of RunPod GPU IDs to fetch.
                 If None, fetch all available GPUs.
+        filter_available: If True, only include GPUs with stock availability.
     """
     try:
         # Initialize RunPod client
@@ -472,8 +489,8 @@ def fetch_runpod_catalog(gpu_ids: Optional[str] = None) -> pd.DataFrame:
 
         # Generate instances from GPU ids
         instances = [
-            instance for gpu in gpus
-            for instance in get_instance_configurations(gpu['id'])
+            instance for gpu in gpus for instance in
+            get_instance_configurations(gpu['id'], filter_available)
         ]
 
         # Create DataFrame
@@ -510,6 +527,12 @@ def main():
         help='Comma-separated list of RunPod GPU IDs to fetch. '
         'If not provided, fetch all GPUs.',
     )
+    parser.add_argument(
+        '--no-filter-available',
+        action='store_true',
+        help='Include all GPUs regardless of stock availability '
+        '(default: filter out unavailable GPUs)',
+    )
     args = parser.parse_args()
 
     try:
@@ -517,7 +540,8 @@ def main():
         os.makedirs(args.output_dir, exist_ok=True)
 
         # Fetch and save catalog
-        df = fetch_runpod_catalog(args.gpu_ids)
+        filter_available = not args.no_filter_available
+        df = fetch_runpod_catalog(args.gpu_ids, filter_available)
         output_path = os.path.join(args.output_dir, 'vms.csv')
         df.to_csv(output_path, index=False)
         print(f'RunPod Service Catalog saved to {output_path}')

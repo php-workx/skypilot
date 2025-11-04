@@ -39,6 +39,12 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
         }
         yaml_utils.dump_yaml(self.temp_config_file, self.initial_config)
 
+        # Mock _resolve_server_config_path to return None, forcing fallback to get_user_config_path
+        self.resolve_config_patcher = mock.patch(
+            'sky.skypilot_config._resolve_server_config_path',
+            return_value=None)
+        self.resolve_config_patcher.start()
+
         # Patch the config path to use our temporary file
         self.config_path_patcher = mock.patch(
             'sky.skypilot_config.get_user_config_path',
@@ -57,6 +63,7 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
 
     def tearDown(self):
         """Clean up test environment."""
+        self.resolve_config_patcher.stop()
         self.config_path_patcher.stop()
         self.to_dict_patcher.stop()
         # Clean up temp files
@@ -247,7 +254,9 @@ class TestWorkspaceConfigConcurrency(unittest.TestCase):
 
             # Re-setup the mocks in the subprocess (this is a limitation
             # of this test approach, but demonstrates the concept)
-            with mock.patch('sky.skypilot_config.get_user_config_path',
+            with mock.patch('sky.skypilot_config._resolve_server_config_path',
+                            return_value=None), \
+                 mock.patch('sky.skypilot_config.get_user_config_path',
                             return_value=self.temp_config_file):
 
                 def mock_to_dict():
