@@ -399,6 +399,11 @@ class RunPod(clouds.Cloud):
         resources = resources.assert_launchable()
         instance_type = resources.instance_type
 
+        # Guard against None/empty instance_type (accelerator-only launch paths)
+        if not instance_type:
+            # No instance type to check, treat as available
+            return True
+
         # Parse instance type to extract GPU info
         # Example: "1x_RTX5090_SECURE" or "2x_H100_SXM"
         gpu_info = cls._parse_instance_type_for_availability(instance_type)
@@ -493,9 +498,10 @@ class RunPod(clouds.Cloud):
                 # No GPU types found - assume available (fail open)
                 return True
 
-            lowest_price = gpu_types[0].get('lowestPrice', {})
+            # Normalize lowestPrice and availableGpuCounts to handle null values
+            lowest_price = gpu_types[0].get('lowestPrice') or {}
             stock_status = lowest_price.get('stockStatus')
-            available_counts = lowest_price.get('availableGpuCounts', [])
+            available_counts = lowest_price.get('availableGpuCounts') or []
 
             # Check if completely out of stock
             if stock_status == 'None':

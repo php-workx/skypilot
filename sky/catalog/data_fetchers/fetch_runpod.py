@@ -428,8 +428,9 @@ def get_instance_configurations(gpu_id: str,
 
         # Skip if availability filtering enabled and GPU has no stock
         if filter_available:
-            stock_status = detailed_gpu.get('lowestPrice',
-                                            {}).get('stockStatus')
+            # Normalize lowestPrice in case API returns null/None
+            lowest_price = detailed_gpu.get('lowestPrice') or {}
+            stock_status = lowest_price.get('stockStatus')
             # stockStatus returns string 'None' when out of stock
             if stock_status == 'None':
                 continue

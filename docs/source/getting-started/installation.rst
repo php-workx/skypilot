@@ -34,6 +34,8 @@ Install SkyPilot using pip:
           pip install "skypilot[fluidstack]"
           pip install "skypilot[paperspace]"
           pip install "skypilot[cudo]"
+          # Seeweb is only supported for Python >= 3.10
+          pip install "skypilot[seeweb]"
           # IBM is only supported for Python <= 3.11
           pip install "skypilot[ibm]"
           # SCP is only supported for Python <= 3.11
@@ -68,6 +70,8 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[paperspace]"
           pip install "skypilot-nightly[do]"
           pip install "skypilot-nightly[cudo]"
+          # Seeweb is only supported for Python >= 3.10
+          pip install "skypilot-nightly[seeweb]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
@@ -100,6 +104,8 @@ Install SkyPilot using pip:
           pip install -e ".[fluidstack]"
           pip install -e ".[paperspace]"
           pip install -e ".[cudo]"
+          # Seeweb is only supported for Python >= 3.10
+          pip install -e ".[seeweb]"
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"

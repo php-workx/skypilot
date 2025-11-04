@@ -123,9 +123,19 @@ def create_catalog(api_key: str,
             # Get available regions from API response
             if filter_available:
                 # Extract region names from regions_with_capacity_available
+                # Handle both dict and string formats
                 available_regions = info[vm].get(
                     'regions_with_capacity_available', [])
-                regions_to_write = [r['name'] for r in available_regions]
+                regions_to_write = []
+                for r in available_regions:
+                    if isinstance(r, dict):
+                        # Dict format: extract 'name' key
+                        region_name = r.get('name')
+                        if region_name:
+                            regions_to_write.append(region_name)
+                    elif isinstance(r, str):
+                        # String format: use directly
+                        regions_to_write.append(r)
             else:
                 # Fall back to all regions
                 regions_to_write = REGIONS
