@@ -21,6 +21,7 @@ import traceback
 from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
+import requests
 from runpod.api import graphql
 
 import runpod
@@ -499,11 +500,13 @@ def get_instance_configurations(gpu_id: str,
                         region_stock_status = (
                             regional_lowest.get('stockStatus') or
                             STOCK_UNAVAILABLE)
-                    except (ValueError, RuntimeError) as exc:
-                        logging.debug(
+                    except (ValueError, RuntimeError,
+                            requests.exceptions.RequestException, TimeoutError):
+                        logging.exception(
                             'Regional availability unavailable for gpu_id=%s '
-                            'gpu_count=%d country_code=%s: %s', gpu_id,
-                            gpu_count, country_code, exc)
+                            'gpu_count=%d country_code=%s', gpu_id, gpu_count,
+                            country_code)
+                        region_stock_status = STOCK_UNAVAILABLE
 
                 if region_stock_status in (None, STOCK_UNAVAILABLE):
                     continue
