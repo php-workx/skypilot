@@ -14,6 +14,7 @@ This flag is intended for testing and debugging individual GPU configurations.
 import argparse
 from functools import lru_cache
 import json
+import logging
 import os
 import sys
 import traceback
@@ -264,6 +265,8 @@ REGION_ZONES = {
     ],
 }
 
+STOCK_UNAVAILABLE = 'UNAVAILABLE'
+
 REGION_COUNTRY_CODES = {
     'CA': 'CA',
     'CZ': 'CZ',
@@ -351,9 +354,10 @@ def get_lowest_price_by_region(gpu_id: str, gpu_count: int,
     result = graphql.run_graphql_query(query)
     gpu_types = result.get('data', {}).get('gpuTypes') or []
     if not gpu_types:
-        raise ValueError('No GPU Types found in RunPod query for region '
-                         f'gpu_id={gpu_id}, gpu_count={gpu_count}, '
-                         f'country_code={country_code}')
+        error_msg = (f'No GPU Types found in RunPod query for region: '
+                     f'gpu_id={gpu_id}, gpu_count={gpu_count}, '
+                     f'country_code={country_code}')
+        raise ValueError(error_msg)
     return gpu_types[0].get('lowestPrice') or {}
 
 
@@ -493,13 +497,15 @@ def get_instance_configurations(gpu_id: str,
                         regional_lowest = get_lowest_price_by_region(
                             gpu_id, gpu_count, country_code)
                         region_stock_status = (
-                            regional_lowest.get('stockStatus') or 'None')
-                    except Exception as exc:  # pylint: disable=broad-except
-                        print('[DEBUG] Failed to fetch regional availability:',
-                              f'gpu_id={gpu_id}', f'gpu_count={gpu_count}',
-                              f'country_code={country_code}', f'error={exc}')
+                            regional_lowest.get('stockStatus') or
+                            STOCK_UNAVAILABLE)
+                    except (ValueError, RuntimeError) as exc:
+                        logging.debug(
+                            'Regional availability unavailable for gpu_id=%s '
+                            'gpu_count=%d country_code=%s: %s', gpu_id,
+                            gpu_count, country_code, exc)
 
-                if region_stock_status in (None, 'None'):
+                if region_stock_status in (None, STOCK_UNAVAILABLE):
                     continue
 
             for zone in zones:
