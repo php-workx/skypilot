@@ -494,10 +494,13 @@ def get_instance_configurations(gpu_id: str,
                             gpu_id, gpu_count, country_code)
                         region_stock_status = (
                             regional_lowest.get('stockStatus') or 'None')
-                    except Exception as exc:  # pylint: disable=broad-except
-                        print('[DEBUG] Failed to fetch regional availability:',
-                              f'gpu_id={gpu_id}', f'gpu_count={gpu_count}',
-                              f'country_code={country_code}', f'error={exc}')
+                    except (ValueError, RuntimeError) as exc:
+                        # Regional data unavailable, will use global stock status
+                        import logging
+                        logging.debug(
+                            'Failed to fetch regional availability: '
+                            'gpu_id=%s, gpu_count=%s, country_code=%s, error=%s',
+                            gpu_id, gpu_count, country_code, exc)
 
                 if region_stock_status in (None, 'None'):
                     continue
