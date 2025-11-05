@@ -12,6 +12,7 @@ This flag is intended for testing and debugging individual GPU configurations.
 """
 
 import argparse
+from functools import lru_cache
 import json
 import os
 import sys
@@ -19,8 +20,9 @@ import traceback
 from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
-import runpod
 from runpod.api import graphql
+
+import runpod
 
 # The API currently returns a dynamic number of vCPUs per pod that
 # changes frequently (less than 30 mins)
@@ -262,6 +264,17 @@ REGION_ZONES = {
     ],
 }
 
+REGION_COUNTRY_CODES = {
+    'CA': 'CA',
+    'CZ': 'CZ',
+    'IS': 'IS',
+    'NL': 'NL',
+    'NO': 'NO',
+    'RO': 'RO',
+    'SE': 'SE',
+    'US': 'US',
+}
+
 
 def get_gpu_details(gpu_id: str, gpu_count: int = 1) -> Dict:
     """Get detailed GPU information using GraphQL query.
@@ -314,6 +327,34 @@ def get_gpu_details(gpu_id: str, gpu_count: int = 1) -> Dict:
         raise ValueError(error_msg) from e
 
     return gpu_type
+
+
+@lru_cache(maxsize=None)
+def get_lowest_price_by_region(gpu_id: str, gpu_count: int,
+                               country_code: str) -> Dict[str, Any]:
+    """Fetch lowestPrice details scoped to a specific country."""
+    query = f"""
+    query GpuLowestPriceByCountry {{
+      gpuTypes(input: {{id: "{gpu_id}"}}) {{
+        lowestPrice(input: {{
+          gpuCount: {gpu_count},
+          countryCode: "{country_code}"
+        }}) {{
+          stockStatus
+          availableGpuCounts
+          maxUnreservedGpuCount
+        }}
+      }}
+    }}
+    """
+
+    result = graphql.run_graphql_query(query)
+    gpu_types = result.get('data', {}).get('gpuTypes') or []
+    if not gpu_types:
+        raise ValueError('No GPU Types found in RunPod query for region '
+                         f'gpu_id={gpu_id}, gpu_count={gpu_count}, '
+                         f'country_code={country_code}')
+    return gpu_types[0].get('lowestPrice') or {}
 
 
 def format_price(price: float) -> float:
@@ -426,14 +467,9 @@ def get_instance_configurations(gpu_id: str,
         if not detailed_gpu['secureCloud']:
             continue
 
-        # Skip if availability filtering enabled and GPU has no stock
-        if filter_available:
-            # Normalize lowestPrice in case API returns null/None
-            lowest_price = detailed_gpu.get('lowestPrice') or {}
-            stock_status = lowest_price.get('stockStatus')
-            # stockStatus returns string 'None' when out of stock
-            if stock_status == 'None':
-                continue
+        # Normalize lowestPrice in case API returns null/None
+        lowest_price = detailed_gpu.get('lowestPrice') or {}
+        global_stock_status = lowest_price.get('stockStatus') or 'UNKNOWN'
 
         # Get basic info including memory & vcpu from the returned data
         # If memory or vpcu is not available, skip this gpu count
@@ -449,6 +485,23 @@ def get_instance_configurations(gpu_id: str,
             base_price = format_price(detailed_gpu['securePrice'] * gpu_count)
 
         for region, zones in REGION_ZONES.items():
+            region_stock_status = global_stock_status
+            if filter_available:
+                country_code = REGION_COUNTRY_CODES.get(region)
+                if country_code:
+                    try:
+                        regional_lowest = get_lowest_price_by_region(
+                            gpu_id, gpu_count, country_code)
+                        region_stock_status = (
+                            regional_lowest.get('stockStatus') or 'None')
+                    except Exception as exc:  # pylint: disable=broad-except
+                        print('[DEBUG] Failed to fetch regional availability:',
+                              f'gpu_id={gpu_id}', f'gpu_count={gpu_count}',
+                              f'country_code={country_code}', f'error={exc}')
+
+                if region_stock_status in (None, 'None'):
+                    continue
+
             for zone in zones:
                 instances.append({
                     'InstanceType': f'{gpu_count}x_{base_gpu_name}_SECURE',
