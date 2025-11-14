@@ -1,6 +1,6 @@
 """AWS CloudWatch logging agent."""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 import pydantic
 
@@ -20,7 +20,16 @@ class _CloudwatchLoggingConfig(pydantic.BaseModel):
     log_stream_prefix: str = 'skypilot-'
     auto_create_group: bool = True
     additional_tags: Optional[Dict[str, str]] = None
-    apply_to: Optional[str] = None  # 'controller_only' to skip replicas
+    apply_to: Optional[Literal['controller_only']] = None
+
+    @pydantic.validator('apply_to')
+    @classmethod
+    def validate_apply_to(cls, v):
+        """Validate apply_to field accepts only 'controller_only' or None."""
+        if v is not None and v != 'controller_only':
+            raise ValueError(f'Invalid value for \'apply_to\': {v!r}. '
+                             'Only \'controller_only\' is supported.')
+        return v
 
 
 class _CloudWatchOutputConfig(pydantic.BaseModel):
@@ -63,11 +72,12 @@ class CloudwatchLoggingAgent(FluentbitAgent):
         apply_to: controller_only  # Optional: only setup logging on controllers
     ```
 
-    The `apply_to` option can be set to 'controller_only' to skip logging setup
-    on replica VMs. This is useful when replicas run on external cloud providers
-    (e.g., RunPod, Lambda) that don't have AWS credentials, while the controller
-    runs on AWS EC2 with IAM role access. Replicas are identified by the
-    presence of the SKYPILOT_SERVE_REPLICA_ID environment variable.
+    The `apply_to` option accepts 'controller_only' (or None, the default) to
+    skip logging setup on replica VMs. This is useful when replicas run on
+    external cloud providers (e.g., RunPod, Lambda) that don't have AWS
+    credentials, while the controller runs on AWS EC2 with IAM role access.
+    Replicas are identified by the presence of the SKYPILOT_SERVE_REPLICA_ID
+    environment variable. Any other value will raise a ValueError.
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -182,8 +192,8 @@ class CloudwatchLoggingAgent(FluentbitAgent):
             'verification."; '
             'fi; ')
 
-        return controller_only_check + pre_cmd + ' ' + super(
-        ).get_setup_command(cluster_name)
+        return (controller_only_check + pre_cmd + ' ' +
+                super().get_setup_command(cluster_name))
 
     def fluentbit_config(self,
                          cluster_name: resources_utils.ClusterName) -> str:
