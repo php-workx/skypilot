@@ -3,6 +3,7 @@
 import unittest
 from unittest import mock
 
+import pydantic
 import yaml
 
 from sky.logs.aws import CloudwatchLoggingAgent
@@ -134,3 +135,49 @@ class TestCloudwatchLoggingAgent(unittest.TestCase):
                 'key': 'skypilot.cluster_name',
                 'value': self.cluster_name.display_name,
             })
+
+    def test_apply_to_valid_values(self):
+        """Test that apply_to accepts valid values."""
+        # Test with None (default)
+        agent = CloudwatchLoggingAgent({})
+        self.assertIsNone(agent.config.apply_to)
+
+        # Test with 'controller_only'
+        agent = CloudwatchLoggingAgent({'apply_to': 'controller_only'})
+        self.assertEqual(agent.config.apply_to, 'controller_only')
+
+    def test_apply_to_invalid_values(self):
+        """Test that apply_to rejects invalid values."""
+        # Test with invalid string (typo)
+        with self.assertRaises(pydantic.ValidationError) as context:
+            CloudwatchLoggingAgent({'apply_to': 'controller-only'})
+        self.assertIn('controller_only', str(context.exception))
+
+        # Test with another invalid value
+        with self.assertRaises(pydantic.ValidationError) as context:
+            CloudwatchLoggingAgent({'apply_to': 'replica_only'})
+        self.assertIn('controller_only', str(context.exception))
+
+        # Test with empty string
+        with self.assertRaises(pydantic.ValidationError) as context:
+            CloudwatchLoggingAgent({'apply_to': ''})
+        self.assertIn('controller_only', str(context.exception))
+
+    @mock.patch('sky.logs.agent.FluentbitAgent.get_setup_command')
+    def test_controller_only_check(self, mock_super_get_setup_command):
+        """Test that controller_only check is added when apply_to is set."""
+        mock_super_get_setup_command.return_value = 'super_command'
+
+        # Test with apply_to='controller_only'
+        agent = CloudwatchLoggingAgent({'apply_to': 'controller_only'})
+        setup_cmd = agent.get_setup_command(self.cluster_name)
+        self.assertIn('SKYPILOT_SERVE_REPLICA_ID', setup_cmd)
+        self.assertIn('Skipping CloudWatch logging setup on replica VM',
+                      setup_cmd)
+        self.assertIn('super_command', setup_cmd)
+
+        # Test without apply_to
+        agent = CloudwatchLoggingAgent({})
+        setup_cmd = agent.get_setup_command(self.cluster_name)
+        self.assertNotIn('SKYPILOT_SERVE_REPLICA_ID', setup_cmd)
+        self.assertIn('super_command', setup_cmd)
