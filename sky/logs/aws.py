@@ -20,6 +20,7 @@ class _CloudwatchLoggingConfig(pydantic.BaseModel):
     log_stream_prefix: str = 'skypilot-'
     auto_create_group: bool = True
     additional_tags: Optional[Dict[str, str]] = None
+    apply_to: Optional[str] = None  # 'controller_only' to skip replicas
 
 
 class _CloudWatchOutputConfig(pydantic.BaseModel):
@@ -59,7 +60,14 @@ class CloudwatchLoggingAgent(FluentbitAgent):
         log_group_name: skypilot-logs
         log_stream_prefix: my-cluster-
         auto_create_group: true
+        apply_to: controller_only  # Optional: only setup logging on controllers
     ```
+
+    The `apply_to` option can be set to 'controller_only' to skip logging setup
+    on replica VMs. This is useful when replicas run on external cloud providers
+    (e.g., RunPod, Lambda) that don't have AWS credentials, while the controller
+    runs on AWS EC2 with IAM role access. Replicas are identified by the
+    presence of the SKYPILOT_SERVE_REPLICA_ID environment variable.
     """
 
     def __init__(self, config: Dict[str, Any]):
@@ -82,6 +90,17 @@ class CloudwatchLoggingAgent(FluentbitAgent):
         Returns:
             The command to set up the CloudWatch logging agent.
         """
+        # If apply_to is set to 'controller_only', skip logging setup on
+        # replica VMs. Replicas are identified by the presence of the
+        # SKYPILOT_SERVE_REPLICA_ID environment variable.
+        controller_only_check = ''
+        if self.config.apply_to == 'controller_only':
+            controller_only_check = (
+                'if [ -n "$SKYPILOT_SERVE_REPLICA_ID" ]; then '
+                'echo "Skipping CloudWatch logging setup on replica VM '
+                '(apply_to=controller_only)"; '
+                'exit 0; '
+                'fi; ')
 
         if self.config.credentials_file:
             credential_path = self.config.credentials_file
@@ -117,14 +136,15 @@ class CloudwatchLoggingAgent(FluentbitAgent):
                 # failed EC2 check, look for env vars
                 'if [ -z "$AWS_ACCESS_KEY_ID" ] || '
                 '[ -z "$AWS_SECRET_ACCESS_KEY" ]; then '
-                'echo "ERROR: AWS CloudWatch logging configuration error. '
+                'echo "WARNING: AWS CloudWatch logging configuration error. '
                 'Not running on EC2 with IAM role and AWS credentials not '
-                'found in environment. Please do one of the following: '
+                'found in environment. Skipping CloudWatch logging setup. '
+                'Please do one of the following: '
                 '1. Run on an EC2 instance with an IAM role that has '
                 'CloudWatch permissions, 2. Set AWS_ACCESS_KEY_ID and '
                 'AWS_SECRET_ACCESS_KEY environment variables, or '
                 '3. Provide a credentials file via logs.aws.credentials_file '
-                'in SkyPilot config." && exit 1; '
+                'in SkyPilot config."; exit 0; '
                 'fi; '
                 'fi;')
 
@@ -152,16 +172,18 @@ class CloudwatchLoggingAgent(FluentbitAgent):
             'if command -v aws > /dev/null; then '
             'aws cloudwatch list-metrics --namespace AWS/Logs --max-items 1 '
             '> /dev/null 2>&1 || '
-            '{ echo "ERROR: Failed to access AWS CloudWatch. Please check '
+            '{ echo "WARNING: Failed to access AWS CloudWatch. Please check '
             'your credentials and permissions."; '
             'echo "The IAM role or user must have cloudwatch:ListMetrics '
             'and logs:* permissions."; '
-            'exit 1; }; '
+            'echo "Skipping CloudWatch logging setup."; '
+            'exit 0; }; '
             'else echo "AWS CLI not installed, skipping CloudWatch access '
             'verification."; '
             'fi; ')
 
-        return pre_cmd + ' ' + super().get_setup_command(cluster_name)
+        return controller_only_check + pre_cmd + ' ' + super(
+        ).get_setup_command(cluster_name)
 
     def fluentbit_config(self,
                          cluster_name: resources_utils.ClusterName) -> str:
