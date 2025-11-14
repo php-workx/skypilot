@@ -51,8 +51,8 @@ run: |
 
   # Fix SSH key permissions to ensure they are 600 (required by SSH)
   # This addresses the fsGroup: 1000 issue in Kubernetes that sets keys to 660
-  find ~/.sky -name 'sky-key' -type f ! -name '*.pub' -exec chmod 600 {} \; 2>/dev/null || true
-  find ~/.ssh -name 'sky-*-key' -type f ! -name '*.pub' -exec chmod 600 {} \; 2>/dev/null || true
+  find ~/.sky -path '*/ssh/*' -type f ! -name '*.pub' -exec chmod 600 {} \; 2>/dev/null || true
+  find ~/.ssh -type f ! -name '*.pub' ! -name 'config' ! -name 'known_hosts' -exec chmod 600 {} \; 2>/dev/null || true
 
   # Start sky serve service.
   {%- if consolidation_mode_job_id is not none %}

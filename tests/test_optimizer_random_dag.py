@@ -71,6 +71,10 @@ def generate_random_dag(
 
             candidate_resources = set()
             for candidate in candidate_instance_types:
+                # Skip candidates with zero or near-zero accelerator count to avoid
+                # conflicts with instance types that have built-in accelerators
+                if candidate.accelerator_count <= 0:
+                    continue
                 instance_type = candidate.instance_type
                 if pd.isna(instance_type):
                     assert candidate.cloud == 'GCP', candidate
