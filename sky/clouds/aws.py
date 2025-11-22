@@ -1,6 +1,7 @@
 """Amazon Web Services."""
 import enum
 import fnmatch
+import functools
 import hashlib
 import json
 import os
@@ -8,7 +9,10 @@ import re
 import subprocess
 import time
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
+from typing import (Any, Callable, Dict, Iterator, List, Literal, Optional, Set,
+                    Tuple, TypeVar, Union)
+
+from typing_extensions import ParamSpec
 
 from sky import catalog
 from sky import clouds
@@ -39,9 +43,11 @@ logger = sky_logging.init_logger(__name__)
 
 # Image ID tags
 _DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu'
+_DEFAULT_CPU_ARM64_IMAGE_ID = 'skypilot:custom-cpu-ubuntu-arm64'
 # For GPU-related package version,
 # see sky/catalog/images/provisioners/cuda.sh
 _DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu'
+_DEFAULT_GPU_ARM64_IMAGE_ID = 'skypilot:custom-gpu-ubuntu-arm64'
 _DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
 _DEFAULT_NEURON_IMAGE_ID = 'skypilot:neuron-ubuntu-2204'
 
@@ -111,6 +117,37 @@ _EFA_DOCKER_RUN_OPTIONS = [
 _EFA_IMAGE_NAME = 'Deep Learning Base OSS Nvidia Driver GPU AMI' \
 ' (Ubuntu 22.04) 20250808'
 
+# For functions that needs caching per AWS profile.
+_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE = 5
+
+T = TypeVar('T')
+P = ParamSpec('P')
+
+
+def aws_profile_aware_lru_cache(*lru_cache_args,
+                                scope: Literal['global', 'request'] = 'request',
+                                **lru_cache_kwargs) -> Callable:
+    """Similar to annotations.lru_cache, but automatically includes the
+    AWS profile (if set in the workspace config) in the cache key.
+    """
+
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:
+
+        @annotations.lru_cache(scope, *lru_cache_args, **lru_cache_kwargs)
+        def cached_impl(aws_profile, *args, **kwargs):
+            del aws_profile  # Only used as part of the cache key.
+            return func(*args, **kwargs)
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            aws_profile = aws.get_workspace_profile()
+            return cached_impl(aws_profile, *args, **kwargs)
+
+        wrapper.cache_clear = cached_impl.cache_clear  # type: ignore[attr-defined]
+        return wrapper
+
+    return decorator
+
 
 def _is_efa_instance_type(instance_type: str) -> bool:
     """Check if the instance type is in EFA supported instance family."""
@@ -156,7 +193,9 @@ def _get_max_efa_interfaces(instance_type: str, region_name: str) -> int:
     try:
         client = aws.client('ec2', region_name=region_name)
         response = client.describe_instance_types(
-            InstanceTypes=[instance_type],
+            # TODO(cooperc): fix the types for mypy 1.16
+            # Boto3 type stubs expect Literal instance types; using str list here.
+            InstanceTypes=[instance_type],  # type: ignore
             Filters=[{
                 'Name': 'network-info.efa-supported',
                 'Values': ['true']
@@ -362,13 +401,22 @@ class AWS(clouds.Cloud):
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
-        image_id = catalog.get_image_id_from_tag(_DEFAULT_CPU_IMAGE_ID,
-                                                 region_name,
-                                                 clouds='aws')
-        if acc is not None:
-            image_id = catalog.get_image_id_from_tag(_DEFAULT_GPU_IMAGE_ID,
+        arch = cls.get_arch_from_instance_type(instance_type)
+        if arch == constants.ARM64_ARCH:
+            image_id = catalog.get_image_id_from_tag(
+                _DEFAULT_CPU_ARM64_IMAGE_ID, region_name, clouds='aws')
+        else:
+            image_id = catalog.get_image_id_from_tag(_DEFAULT_CPU_IMAGE_ID,
                                                      region_name,
                                                      clouds='aws')
+        if acc is not None:
+            if arch == constants.ARM64_ARCH:
+                image_id = catalog.get_image_id_from_tag(
+                    _DEFAULT_GPU_ARM64_IMAGE_ID, region_name, clouds='aws')
+            else:
+                image_id = catalog.get_image_id_from_tag(_DEFAULT_GPU_IMAGE_ID,
+                                                         region_name,
+                                                         clouds='aws')
             assert len(acc) == 1, acc
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
@@ -449,7 +497,8 @@ class AWS(clouds.Cloud):
         return image_size
 
     @classmethod
-    @annotations.lru_cache(scope='request', maxsize=1)
+    @aws_profile_aware_lru_cache(scope='request',
+                                 maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
     def get_image_root_device_name(cls, image_id: str,
                                    region: Optional[str]) -> str:
         if image_id.startswith('skypilot:'):
@@ -570,6 +619,13 @@ class AWS(clouds.Cloud):
     ) -> Optional[Dict[str, Union[int, float]]]:
         return catalog.get_accelerators_from_instance_type(instance_type,
                                                            clouds='aws')
+
+    @classmethod
+    def get_arch_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Optional[str]:
+        return catalog.get_arch_from_instance_type(instance_type, clouds='aws')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
@@ -768,8 +824,9 @@ class AWS(clouds.Cloud):
         return cls._check_credentials()
 
     @classmethod
-    @annotations.lru_cache(scope='request',
-                           maxsize=1)  # Cache since getting identity is slow.
+    # Cache since getting identity is slow.
+    @aws_profile_aware_lru_cache(scope='request',
+                                 maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to AWS."""
 
@@ -904,9 +961,16 @@ class AWS(clouds.Cloud):
         return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    @annotations.lru_cache(scope='request', maxsize=1)
+    @aws_profile_aware_lru_cache(scope='request',
+                                 maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
     def _aws_configure_list(cls) -> Optional[bytes]:
-        proc = subprocess.run('aws configure list',
+        cmd = 'aws configure list'
+        # Profile takes precedence over default configs.
+        profile = aws.get_workspace_profile()
+        if profile is not None:
+            # If profile does not exist, we will get returncode 255.
+            cmd += f' --profile {profile}'
+        proc = subprocess.run(cmd,
                               shell=True,
                               check=False,
                               stdout=subprocess.PIPE,
@@ -916,8 +980,9 @@ class AWS(clouds.Cloud):
         return proc.stdout
 
     @classmethod
-    @annotations.lru_cache(scope='request',
-                           maxsize=1)  # Cache since getting identity is slow.
+    # Cache since getting identity is slow.
+    @aws_profile_aware_lru_cache(scope='request',
+                                 maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
     def _sts_get_caller_identity(cls) -> Optional[List[List[str]]]:
         try:
             sts = aws.client('sts', check_credentials=False)
@@ -998,8 +1063,9 @@ class AWS(clouds.Cloud):
         return [user_ids]
 
     @classmethod
-    @annotations.lru_cache(scope='request',
-                           maxsize=1)  # Cache since getting identity is slow.
+    # Cache since getting identity is slow.
+    @aws_profile_aware_lru_cache(scope='request',
+                                 maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns a [UserId, Account] list that uniquely identifies the user.
 
@@ -1094,6 +1160,7 @@ class AWS(clouds.Cloud):
         # provider of the cluster to be launched in this function and make sure
         # the cluster will not be used for launching clusters in other clouds,
         # e.g. jobs controller.
+
         if self._current_identity_type(
         ) != AWSIdentityType.SHARED_CREDENTIALS_FILE:
             return {}
@@ -1103,7 +1170,8 @@ class AWS(clouds.Cloud):
             if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
         }
 
-    @annotations.lru_cache(scope='request', maxsize=1)
+    @aws_profile_aware_lru_cache(scope='request',
+                                 maxsize=_AWS_PROFILE_SCOPED_FUNC_CACHE_SIZE)
     def can_credential_expire(self) -> bool:
         identity_type = self._current_identity_type()
         return (identity_type is not None and

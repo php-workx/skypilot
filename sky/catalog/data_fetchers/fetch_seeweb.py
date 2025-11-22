@@ -22,7 +22,7 @@ SEEWEB_GPU_NAME_TO_SKYPILOT_GPU_NAME = {
     'RTX A6000 48GB': 'RTXA6000',
     'A100 80GB': 'A100',
     'L4 24GB': 'L4',
-    'L40s 48GB': 'L40s',
+    'L40s 48GB': 'L40S',
     'H100 80GB': 'H100',
     'MI300X': 'MI300X',
     'A30': 'A30',
@@ -37,7 +37,7 @@ VRAM = {
     'H200': 144384,  # 141GB
     'A100': 81920,  # 80GB
     'L4': 24576,  # 24GB
-    'L40s': 49152,  # 48GB
+    'L40S': 49152,  # 48GB
     'H100': 81920,  # 80GB
     'MI300X': 192000,  # 192GB
     'A30': 24576,  # 24GB
@@ -260,13 +260,10 @@ def create_catalog(api_key: str, output_path: str) -> None:
 
         for plan in plans:
             try:
-                # Normalize GPU fields to prevent 'None' strings in CSV
-                gpu_name = plan.get('gpu_name') or ''
-                gpu_count = plan.get('gpu_count', 0)
-
                 gpu_info_str = ''
-                if gpu_name and gpu_count > 0:
-                    gpu_info_str = get_gpu_info(gpu_count, gpu_name,
+                if plan['gpu_name'] and plan['gpu_count'] > 0:
+                    gpu_info_str = get_gpu_info(plan['gpu_count'],
+                                                plan['gpu_name'],
                                                 plan.get('gpu_vram_mb', 0))
 
                 # Handle regions - create a row for each available region
@@ -277,9 +274,9 @@ def create_catalog(api_key: str, output_path: str) -> None:
                     for region in regions_available:
                         writer.writerow([
                             plan['plan_name'],  # InstanceType
-                            gpu_name,  # AcceleratorName (empty for CPU-only)
-                            gpu_count
-                            if gpu_count > 0 else '',  # AcceleratorCount
+                            plan['gpu_name'],  # AcceleratorName (cleaned)
+                            plan['gpu_count'] if plan['gpu_count'] > 0 else
+                            '',  # AcceleratorCount
                             plan['vcpus'],  # vCPUs
                             plan['memory_gb'],  # MemoryGiB
                             plan['price'],  # Price
@@ -291,8 +288,9 @@ def create_catalog(api_key: str, output_path: str) -> None:
                     # No regions available, create a row with empty region
                     writer.writerow([
                         plan['plan_name'],  # InstanceType
-                        gpu_name,  # AcceleratorName (empty for CPU-only)
-                        gpu_count if gpu_count > 0 else '',  # AcceleratorCount
+                        plan['gpu_name'],  # AcceleratorName (cleaned)
+                        plan['gpu_count']
+                        if plan['gpu_count'] > 0 else '',  # AcceleratorCount
                         plan['vcpus'],  # vCPUs
                         plan['memory_gb'],  # MemoryGiB
                         plan['price'],  # Price

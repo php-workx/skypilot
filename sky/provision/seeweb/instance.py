@@ -9,7 +9,6 @@ import subprocess
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from sky import authentication as auth
 from sky import sky_logging
 from sky.adaptors import seeweb as seeweb_adaptor
 from sky.provision import common
@@ -17,6 +16,7 @@ from sky.provision.common import ClusterInfo
 from sky.provision.common import InstanceInfo
 from sky.provision.common import ProvisionConfig
 from sky.provision.common import ProvisionRecord
+from sky.utils import auth_utils
 from sky.utils import command_runner  # Unified SSH helper
 from sky.utils import common_utils
 from sky.utils import status_lib
@@ -75,7 +75,7 @@ class SeewebNodeProvider:
         if self.config and self.config.authentication_config:
             key_path = self.config.authentication_config.get('ssh_private_key')
         if not key_path:
-            key_path, _ = auth.get_or_generate_keys()
+            key_path, _ = auth_utils.get_or_generate_keys()
         return os.path.expanduser(key_path)
 
     # ------------------------------------------------------------------ #
@@ -146,6 +146,8 @@ class SeewebNodeProvider:
     def terminate_instances(self) -> None:
         for srv in self._query_cluster_nodes():
             logger.info('Deleting server %s …', srv.name)
+            self.ecs.delete_server(srv.name)  # DELETE /servers/{name}
+
             # Retry deletion with exponential backoff
             # to handle transient API errors
             common_utils.retry(self.ecs.delete_server,
@@ -500,9 +502,10 @@ class SeewebNodeProvider:
 # =============================================================================
 
 
-def run_instances(region: str, cluster_name_on_cloud: str,
+def run_instances(region: str, cluster_name: str, cluster_name_on_cloud: str,
                   config: ProvisionConfig) -> ProvisionRecord:
     """Run instances for Seeweb cluster."""
+    del cluster_name  # unused
     provider = SeewebNodeProvider(config, cluster_name_on_cloud)
     provider.run_instances(config.node_config, config.count)
 
@@ -597,11 +600,6 @@ def wait_instances(
             if s.notes and s.notes.startswith(cluster_name_on_cloud)
         ]
         if not cluster_nodes:
-            # If we're waiting for 'Terminated' state and cluster is gone,
-            # termination is complete - return immediately
-            if seeweb_state == 'Terminated':
-                return
-            # Otherwise, cluster may not be created yet - keep waiting
             time.sleep(_POLL_INTERVAL)
             continue
 
@@ -663,7 +661,7 @@ def _ping_server_standalone(server_ip: str) -> bool:
 def _check_ssh_ready_standalone(server_ip: str) -> bool:
     """Check that SSH is available on the server (standalone version)."""
     try:
-        private_key_path, _ = auth.get_or_generate_keys()
+        private_key_path, _ = auth_utils.get_or_generate_keys()
         private_key_path = os.path.expanduser(private_key_path)
         ssh_user = 'ecuser'
         result = subprocess.run([

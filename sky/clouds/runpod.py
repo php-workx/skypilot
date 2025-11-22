@@ -355,9 +355,20 @@ class RunPod(clouds.Cloud):
         if not os.path.exists(credential_file):
             return False, '~/.runpod/config.toml does not exist.'
 
-        # we don't need to import toml here if config.toml does not exist,
-        # wait until we know the cred file exists.
-        import tomli as toml  # pylint: disable=import-outside-toplevel
+        # We don't need to import TOML parser if config.toml does not exist.
+        # When needed, prefer stdlib tomllib (py>=3.11); otherwise use tomli.
+        # TODO(andy): remove this fallback after dropping Python 3.10 support.
+        try:
+            try:
+                import tomllib as toml  # pylint: disable=import-outside-toplevel
+            except ModuleNotFoundError:  # py<3.11
+                import tomli as toml  # pylint: disable=import-outside-toplevel
+        except ModuleNotFoundError:
+            # Should never happen. We already installed proper dependencies for
+            # different Python versions in setup_files/dependencies.py.
+            return False, (
+                '~/.runpod/config.toml exists but no TOML parser is available. '
+                'Install tomli for Python < 3.11: pip install tomli.')
 
         # Check for default api_key
         try:

@@ -1071,6 +1071,7 @@ _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
 }
 
 _CONTEXT_CONFIG_SCHEMA_KUBERNETES = {
+    # TODO(kevin): Remove 'networking' in v0.13.0.
     'networking': {
         'type': 'string',
         'case_insensitive_enum': [
@@ -1189,7 +1190,13 @@ def get_config_schema():
                         'consolidation_mode': {
                             'type': 'boolean',
                             'default': False,
-                        }
+                        },
+                        'controller_logs_gc_retention_hours': {
+                            'type': 'integer',
+                        },
+                        'task_logs_gc_retention_hours': {
+                            'type': 'integer',
+                        },
                     },
                 },
                 'bucket': {
@@ -1331,10 +1338,15 @@ def get_config_schema():
             'additionalProperties': False,
             'properties': {
                 'allowed_contexts': {
-                    'type': 'array',
-                    'items': {
+                    'oneOf': [{
+                        'type': 'array',
+                        'items': {
+                            'type': 'string',
+                        },
+                    }, {
                         'type': 'string',
-                    },
+                        'pattern': '^all$'
+                    }]
                 },
                 'context_configs': {
                     'type': 'object',
@@ -1586,10 +1598,10 @@ def get_config_schema():
 
     allowed_workspace_cloud_names = list(constants.ALL_CLOUDS) + ['cloudflare']
     # Create pattern for not supported clouds, i.e.
-    # all clouds except gcp, kubernetes, ssh
+    # all clouds except aws, gcp, kubernetes, ssh, nebius
     not_supported_clouds = [
         cloud for cloud in allowed_workspace_cloud_names
-        if cloud.lower() not in ['gcp', 'kubernetes', 'ssh', 'nebius']
+        if cloud.lower() not in ['aws', 'gcp', 'kubernetes', 'ssh', 'nebius']
     ]
     not_supported_cloud_regex = '|'.join(not_supported_clouds)
     workspaces_schema = {
@@ -1600,7 +1612,8 @@ def get_config_schema():
             'type': 'object',
             'additionalProperties': False,
             'patternProperties': {
-                # Pattern for non-GCP clouds - only allows 'disabled' property
+                # Pattern for clouds with no workspace-specific config -
+                # only allow 'disabled' property.
                 f'^({not_supported_cloud_regex})$': {
                     'type': 'object',
                     'additionalProperties': False,
@@ -1635,6 +1648,18 @@ def get_config_schema():
                     },
                     'additionalProperties': False,
                 },
+                'aws': {
+                    'type': 'object',
+                    'properties': {
+                        'profile': {
+                            'type': 'string'
+                        },
+                        'disabled': {
+                            'type': 'boolean'
+                        },
+                    },
+                    'additionalProperties': False,
+                },
                 'ssh': {
                     'type': 'object',
                     'required': [],
@@ -1656,10 +1681,15 @@ def get_config_schema():
                     'required': [],
                     'properties': {
                         'allowed_contexts': {
-                            'type': 'array',
-                            'items': {
+                            'oneOf': [{
+                                'type': 'array',
+                                'items': {
+                                    'type': 'string',
+                                },
+                            }, {
                                 'type': 'string',
-                            },
+                                'pattern': '^all$'
+                            }]
                         },
                         'disabled': {
                             'type': 'boolean'
