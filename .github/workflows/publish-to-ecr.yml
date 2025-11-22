@@ -20,7 +20,7 @@ on:
 
 env:
   AWS_REGION: eu-central-1
-  SKYPILOT_BASE_VERSION: '0.10.3'
+  SKYPILOT_BASE_VERSION: '0.10.5'
   # ECR_REGISTRY will be set dynamically from AWS account
 
 jobs:
