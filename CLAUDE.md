@@ -48,7 +48,7 @@ If not using DevContainer or need Python 3.10 specifically:
 #### 1. Create Virtual Environment
 
 ```bash
-cd /Users/runger/workspaces/amplifier/ai_working/skypilot
+cd /workspace/skypilot
 uv venv --python 3.10 .venv
 ```
 
@@ -73,7 +73,7 @@ The following environment variables MUST be set when running tests:
 ```bash
 export SKYPILOT_DEBUG=1
 export SKYPILOT_DISABLE_USAGE_COLLECTION=1
-export PYTHONPATH=/Users/runger/workspaces/amplifier/ai_working/skypilot
+export PYTHONPATH=/workspace/skypilot
 ```
 
 These are also configured in `pyproject.toml` for pytest.
@@ -83,8 +83,8 @@ These are also configured in `pyproject.toml` for pytest.
 ### Run Specific Test Class
 
 ```bash
-cd /Users/runger/workspaces/amplifier/ai_working/skypilot
-export PYTHONPATH=/Users/runger/workspaces/amplifier/ai_working/skypilot
+cd /workspace/skypilot
+export PYTHONPATH=/workspace/skypilot
 export SKYPILOT_DEBUG=1
 export SKYPILOT_DISABLE_USAGE_COLLECTION=1
 

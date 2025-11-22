@@ -37,7 +37,14 @@ RUN apt-get update && apt-get install -y \
     screen \
     less \
     unzip \
-    rsync
+    rsync \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install newer git from archived backports
+RUN echo "deb http://archive.debian.org/debian bullseye-backports main" >> /etc/apt/sources.list \
+    && apt-get update -o Acquire::Check-Valid-Until=false \
+    && apt-get install -y -t bullseye-backports git \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements-dev.txt /tmp/requirements-dev.txt
 
