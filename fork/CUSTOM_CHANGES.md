@@ -208,7 +208,11 @@ for info in replica_infos:
         logger.info(f'Cluster {info.cluster_name} for replica '
                     f'{info.replica_id} not found. Might be a failed '
                     'cluster. Removing replica from database.')
-        serve_state.remove_replica(service_name, info.replica_id)  # FIX
+        try:
+            serve_state.remove_replica(service_name, info.replica_id)  # FIX
+        except Exception as e:
+            logger.warning(f'Failed to remove replica {info.replica_id} '
+                           f'from database: {e}')
         continue
 ```
 
