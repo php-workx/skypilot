@@ -2,7 +2,7 @@
 
 **Purpose:** Track all intentional modifications to the SkyPilot codebase for easier upgrades.
 
-**Last Updated:** 2025-11-22
+**Last Updated:** 2025-12-03
 **Base Version:** v0.10.5
 
 ---
@@ -84,7 +84,7 @@ Features we added that might be in upstream now - check each upgrade.
 
 ## Custom Features
 
-### 1. Custom Catalog URLs 🟢 KEEP ALWAYS
+### Custom Catalog URLs 🟢 KEEP ALWAYS
 
 **Description:** Allow overriding catalog URLs via environment variables for custom cloud deployments.
 
@@ -106,7 +106,7 @@ Features we added that might be in upstream now - check each upgrade.
 
 ---
 
-### 2. CloudWatch Logging Enhancements 🟡 MERGE CAREFULLY
+### CloudWatch Logging Enhancements 🟡 MERGE CAREFULLY
 
 **Description:** Graceful degradation and controller-only logging for AWS CloudWatch.
 
@@ -142,7 +142,7 @@ if not credentials_available:
 
 ---
 
-### 3. RunPod Availability Filtering 🟡 MERGE CAREFULLY
+### RunPod Availability Filtering 🟡 MERGE CAREFULLY
 
 **Description:** Only show actually available GPU instances in catalog.
 
@@ -181,7 +181,56 @@ def regions_with_offering(...):
 
 ---
 
-### 4. Cudo Python 3.10 Compatibility 🟡 MERGE CAREFULLY
+### Serve Orphaned Replica Cleanup 🟡 MERGE CAREFULLY
+
+**Description:** Fix bug where orphaned replica records are not cleaned from the database during `sky serve down`.
+
+**Commits:**
+- `TBD` - fix: clean up orphaned replica records during serve down
+
+**Files:**
+- `sky/serve/service.py` 🟡 (modified)
+  - Added `serve_state.remove_replica()` call when cluster doesn't exist
+
+**Changes:**
+```python
+# Before (upstream):
+for info in replica_infos:
+    if info.cluster_name not in existing_cluster_names:
+        logger.info(f'Cluster {info.cluster_name} for replica '
+                    f'{info.replica_id} not found. Might be a failed '
+                    'cluster. Skipping.')
+        continue  # BUG: replica left in database
+
+# After (ours):
+for info in replica_infos:
+    if info.cluster_name not in existing_cluster_names:
+        logger.info(f'Cluster {info.cluster_name} for replica '
+                    f'{info.replica_id} not found. Might be a failed '
+                    'cluster. Removing replica from database.')
+        serve_state.remove_replica(service_name, info.replica_id)  # FIX
+        continue
+```
+
+**Problem:**
+When a replica's cluster doesn't exist (failed launch, manually deleted, etc.), the `_cleanup()` function logs "Skipping" but never removes the replica record from the database. This causes stale replicas to appear when reusing a service name.
+
+**Merge Strategy:**
+- Check if upstream fixed this bug
+- If yes: accept upstream
+- If no: keep our fix
+- This is a clear bug fix, likely acceptable upstream
+
+**Test:**
+1. Create a service with replicas
+2. Have some replicas fail (cluster doesn't exist)
+3. `sky serve down` the service
+4. `sky serve up` with same name
+5. Verify no old replicas are visible
+
+---
+
+### Cudo Python 3.10 Compatibility 🟡 MERGE CAREFULLY
 
 **Description:** Support both old and new Cudo SDK package names for Python 3.10.
 
@@ -220,7 +269,7 @@ def _load_cudo_api_module():
 
 ---
 
-### 5. Seeweb Provider 🔵 REVIEW & DECIDE
+### Seeweb Provider 🔵 REVIEW & DECIDE
 
 **Description:** Support for Seeweb cloud provider.
 
@@ -331,6 +380,7 @@ def _load_cudo_api_module():
 - `sky/logs/aws.py` - CloudWatch logging
 - `sky/clouds/runpod.py` - Availability filtering
 - `sky/clouds/cudo.py` - Python 3.10 compat
+- `sky/serve/service.py` - Orphaned replica cleanup
 
 **Usually Accept Theirs:**
 - `sky/__init__.py` - Just add new cloud imports
@@ -394,6 +444,7 @@ When upgrading to a new version:
   - [ ] Custom catalog URLs
   - [ ] CloudWatch logging (controller-only)
   - [ ] RunPod availability filtering
+  - [ ] Serve orphaned replica cleanup
   - [ ] Cudo on Python 3.10
   - [ ] Seeweb (using upstream)
 - [ ] Update this file with new version and changes
