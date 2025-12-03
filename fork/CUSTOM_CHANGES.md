@@ -186,7 +186,7 @@ def regions_with_offering(...):
 **Description:** Fix bug where orphaned replica records are not cleaned from the database during `sky serve down`.
 
 **Commits:**
-- `TBD` - fix: clean up orphaned replica records during serve down
+- `7ef720b9c` - fix(serve): clean up orphaned replica records during service shutdown
 
 **Files:**
 - `sky/serve/service.py` 🟡 (modified)
