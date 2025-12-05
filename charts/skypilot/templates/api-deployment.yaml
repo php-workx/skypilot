@@ -68,6 +68,8 @@ spec:
           value: {{ .Values.apiService.skypilotDev | quote }}
         - name: SKYPILOT_RELEASE_NAME
           value: {{ .Release.Name | quote }}
+        - name: SKYPILOT_CONTROLLER_IMAGE
+          value: {{ default .Values.apiService.image .Values.apiService.controllerImage | quote }}
         {{- if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }}
         - name: SKYPILOT_INITIAL_BASIC_AUTH
           valueFrom:
