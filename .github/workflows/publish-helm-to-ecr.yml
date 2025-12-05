@@ -55,6 +55,7 @@ jobs:
           version: 'latest'
 
       - name: Update Chart metadata
+        id: update-chart-metadata
         run: |
           version="${{ inputs.version }}"
 
@@ -67,6 +68,9 @@ jobs:
 
           echo "Original version: $version"
           echo "SemVer version: $semversion"
+
+          # Export semversion to GITHUB_OUTPUT for later steps
+          echo "semversion=${semversion}" >> $GITHUB_OUTPUT
 
           # Update the version and name in the main skypilot chart
           sed -i "s/^version:.*$/version: ${semversion}/" charts/skypilot/Chart.yaml
@@ -113,18 +117,19 @@ jobs:
           echo "   oci://${REGISTRY}/${REGISTRY_ALIAS}/${{ inputs.package_name }}"
           echo ""
           echo "📝 To use this chart:"
-          echo "   helm install my-release oci://${REGISTRY}/${REGISTRY_ALIAS}/${{ inputs.package_name }} --version ${{ inputs.version }}"
+          echo "   helm install my-release oci://${REGISTRY}/${REGISTRY_ALIAS}/${{ inputs.package_name }} --version ${{ steps.update-chart-metadata.outputs.semversion }}"
 
       - name: Summary
         run: |
           echo "## Helm Chart Published 🚀" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Chart:** ${{ inputs.package_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.update-chart-metadata.outputs.semversion }}" >> $GITHUB_STEP_SUMMARY
+          echo "**App Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Installation Command" >> $GITHUB_STEP_SUMMARY
           echo '```bash' >> $GITHUB_STEP_SUMMARY
           echo "helm install skypilot oci://${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}/${{ inputs.package_name }} \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --version ${{ inputs.version }} \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --version ${{ steps.update-chart-metadata.outputs.semversion }} \\" >> $GITHUB_STEP_SUMMARY
           echo "  --set apiService.image=your-image:tag" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY

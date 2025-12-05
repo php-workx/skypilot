@@ -1,6 +1,6 @@
 # SkyPilot Complete Reference: Provisioning, Availability & Blocking
 
-**Comprehensive guide to SkyPilot's resource management, pricing updates, availability checking, multi-region failover, and blocking mechanisms**
+Comprehensive guide to SkyPilot's resource management, pricing updates, availability checking, multi-region failover, and blocking mechanisms
 
 ---
 
@@ -56,14 +56,16 @@ SkyPilot uses a **hybrid pricing system**:
 
 ### Storage Locations
 
-**Remote (source of truth)**:
-```
+#### Remote (source of truth)
+
+```text
 Primary:  https://raw.githubusercontent.com/skypilot-org/skypilot-catalog/master/catalogs/v8/{cloud}/vms.csv
 Fallback: https://skypilot-catalog.s3.us-east-1.amazonaws.com/catalogs/v8/{cloud}/vms.csv
 ```
 
-**Local cache**:
-```
+#### Local cache
+
+```text
 ~/.sky/catalogs/v8/
 ├── aws/vms.csv
 ├── gcp/vms.csv
@@ -79,7 +81,7 @@ Fallback: https://skypilot-catalog.s3.us-east-1.amazonaws.com/catalogs/v8/{cloud
 
 **File**: `sky/catalog/common.py:read_catalog()`
 
-**Update frequency by cloud**:
+#### Update frequency by cloud
 
 | Cloud | Update Policy | Reason |
 |-------|--------------|--------|
@@ -218,8 +220,9 @@ def run_instances(...):
             raise
 ```
 
-**What happens**:
-```
+#### What happens
+
+```text
 1. User: sky launch --gpus L40S --region CZ
    ↓
 2. SkyPilot checks catalog: "CZ has L40S: ✓"
@@ -333,7 +336,7 @@ runpod.create_pod(gpu_type_id=gpu_type, ...)
 
 ### The Launch Sequence
 
-```
+```text
 User specifies: L40S in EU region
   ↓
 Optimizer selects: (RunPod, IS, L40S:1)  [Iceland - best odds]
@@ -446,7 +449,7 @@ resources:
 
 ### How Auto-Failover Works
 
-**Documentation**: https://docs.skypilot.co/en/latest/examples/auto-failover.html
+**Documentation**: [SkyPilot Auto-Failover Guide](https://docs.skypilot.co/en/latest/examples/auto-failover.html)
 
 **Failover sequence**:
 
@@ -535,8 +538,9 @@ resources:
     accelerators: L40S:1
 ```
 
-**Execution**:
-```
+#### Execution
+
+```text
 Optimizer picks: (RunPod, IS, L40S:1)
   ↓
 _retry_zones() tries all zones in IS:
@@ -624,7 +628,7 @@ def should_be_blocked_by(candidate: Resources,
 
 ### Example Blocking Scenarios
 
-**Scenario 1: Different regions, same cloud**
+#### Scenario 1: Different regions, same cloud
 
 ```python
 blocked = Resources(cloud='runpod', region='IS', instance='gpu', accel={'L40S': 1})
@@ -634,7 +638,7 @@ candidate = Resources(cloud='runpod', region='CZ', instance='gpu', accel={'L40S'
 # Result: NOT BLOCKED ✓
 ```
 
-**Scenario 2: Same region**
+#### Scenario 2: Same region
 
 ```python
 blocked = Resources(cloud='runpod', region='IS', instance='gpu', accel={'L40S': 1})
@@ -644,7 +648,7 @@ candidate = Resources(cloud='runpod', region='IS', instance='gpu', accel={'L40S'
 # Result: BLOCKED ✓
 ```
 
-**Scenario 3: Different GPU, same region**
+#### Scenario 3: Different GPU, same region
 
 ```python
 blocked = Resources(cloud='runpod', region='IS', instance='gpu', accel={'L40S': 1})
@@ -733,8 +737,9 @@ resources:
     region: NL
 ```
 
-**Execution**:
-```
+#### Execution
+
+```text
 Try (RunPod, IS) → All zones fail
   ↓
 Block: (RunPod, IS, instance, L40S)
@@ -1109,6 +1114,8 @@ print(self._blocked_resources)
 - `blocking_granularity_analysis.md`
 
 **All source code references verified against**: `/Users/runger/workspaces/amplifier/ai_working/skypilot/`
+
+---
 
 ---
 
