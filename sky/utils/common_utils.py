@@ -1123,3 +1123,50 @@ def release_memory():
         logger.error(f'Failed to release memory: '
                      f'{format_exception(e)}')
         return 0
+
+
+def set_controller_image(user_config: Dict[str, Any],
+                         controller_type: str) -> None:
+    """Inject controller image if SKYPILOT_CONTROLLER_IMAGE env var is set.
+
+    This function modifies the user_config in-place to set the container image
+    for Kubernetes controllers (serve or jobs) if the SKYPILOT_CONTROLLER_IMAGE
+    environment variable is set. This allows controllers to use the same image
+    as the API server by default.
+
+    Args:
+        user_config: The user configuration dictionary to modify
+        controller_type: Type of controller ('serve' or 'jobs')
+
+    The function only modifies the config if:
+    1. SKYPILOT_CONTROLLER_IMAGE environment variable is set
+    2. The controller is configured to use Kubernetes cloud
+    3. User hasn't already specified custom containers in pod_config
+    """
+    controller_image = os.environ.get('SKYPILOT_CONTROLLER_IMAGE')
+    if not controller_image:
+        return
+
+    # Check if this is a kubernetes controller
+    controller_cloud = user_config.get(controller_type,
+                                       {}).get('controller',
+                                               {}).get('resources',
+                                                       {}).get('cloud')
+
+    if controller_cloud != 'kubernetes':
+        return
+
+    # Only override if user hasn't already specified pod_config.spec.containers
+    user_containers = user_config.get('kubernetes',
+                                      {}).get('pod_config',
+                                              {}).get('spec',
+                                                      {}).get('containers')
+
+    if user_containers:
+        return
+
+    # Set the controller image
+    k8s_config = user_config.setdefault('kubernetes', {})
+    pod_config = k8s_config.setdefault('pod_config', {})
+    spec = pod_config.setdefault('spec', {})
+    spec['containers'] = [{'name': 'ray-node', 'image': controller_image}]

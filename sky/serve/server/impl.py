@@ -235,6 +235,10 @@ def up(
                 local_user_config=mutated_user_config,
             ),
         }
+
+        # Inject controller image if specified via environment variable
+        common_utils.set_controller_image(mutated_user_config, 'serve')
+
         common_utils.fill_template(serve_constants.CONTROLLER_TEMPLATE,
                                    vars_to_fill,
                                    output_path=controller_file.name)

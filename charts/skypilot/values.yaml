@@ -2,6 +2,11 @@ apiService:
   # Docker image to use for the API server. The default value will be updated by the release pipeline to be consistent with the SkyPilot release or nightly build.
   # Refer to https://docs.skypilot.co/en/latest/reference/api-server/helm-values-spec.html#helm-values-apiservice-image for more details.
   image: berkeleyskypilot/skypilot-nightly:latest
+  # Optional: Override the image used for serve and jobs controllers on Kubernetes.
+  # If not specified, defaults to the same image as apiService.image above.
+  # This ensures version consistency between API server and controllers.
+  # @schema type: [string, null]
+  controllerImage: null
   # Number of replicas to deploy - replicas > 1 is not well tested.
   replicas: 1
   preDeployHook: |-

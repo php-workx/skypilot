@@ -427,6 +427,9 @@ def launch(
                 ),
             }
 
+            # Inject controller image if specified via environment variable
+            common_utils.set_controller_image(mutated_user_config, 'jobs')
+
             yaml_path = os.path.join(
                 managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
                 f'{name}-{dag_uuid}-{consolidation_mode_job_id}-{job_rank}.yaml'
