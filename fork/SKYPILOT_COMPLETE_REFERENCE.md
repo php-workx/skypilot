@@ -1119,4 +1119,4 @@ print(self._blocked_resources)
 
 ---
 
-*End of Complete Reference*
+<!-- End of Complete Reference -->
