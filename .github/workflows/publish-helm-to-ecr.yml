@@ -1,0 +1,130 @@
+name: Publish Helm Chart to ECR
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to set in Chart.yaml (e.g., 0.10.5)'
+        required: true
+        type: string
+      package_name:
+        description: 'Package name to use as chart name'
+        required: false
+        type: string
+        default: 'skypilot'
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to set in Chart.yaml'
+        required: true
+        type: string
+      package_name:
+        description: 'Package name to use as chart name'
+        required: false
+        type: string
+        default: 'skypilot'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  ECR_REPOSITORY: ojin/skypilot-helm
+
+jobs:
+  publish-helm-chart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ECR_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Update Chart metadata
+        run: |
+          version="${{ inputs.version }}"
+
+          # Convert PEP440 version to SemVer if needed for Helm versioning
+          semversion=$(echo "$version" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.dev([0-9]+)/\1-dev.\2/')
+          semversion=$(echo "$semversion" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)rc([0-9]+)/\1-rc.\2/')
+          semversion=$(echo "$semversion" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)a([0-9]+)/\1-alpha.\2/')
+          semversion=$(echo "$semversion" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)b([0-9]+)/\1-beta.\2/')
+          semversion=$(echo "$semversion" | sed -E 's/([0-9]+\.[0-9]+\.[0-9]+)\.post([0-9]+)/\1+post.\2/')
+
+          echo "Original version: $version"
+          echo "SemVer version: $semversion"
+
+          # Update the version and name in the main skypilot chart
+          sed -i "s/^version:.*$/version: ${semversion}/" charts/skypilot/Chart.yaml
+          sed -i "s/^appVersion:.*$/appVersion: ${version}/" charts/skypilot/Chart.yaml
+          sed -i "s/^name:.*$/name: ${{ inputs.package_name }}/" charts/skypilot/Chart.yaml
+
+          # Display updated Chart.yaml
+          echo "Updated Chart.yaml:"
+          cat charts/skypilot/Chart.yaml
+
+      - name: Package Helm Chart
+        run: |
+          # Update dependencies first
+          helm dependency update charts/skypilot
+
+          # Package the chart
+          helm package charts/skypilot -d ./packaged-charts
+
+          # Show what was packaged
+          ls -lh ./packaged-charts/
+
+      - name: Push Helm Chart to ECR
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REGISTRY_ALIAS: ${{ env.ECR_REPOSITORY }}
+        run: |
+          # Find the packaged chart
+          CHART_PACKAGE=$(ls ./packaged-charts/*.tgz | head -1)
+
+          if [ -z "$CHART_PACKAGE" ]; then
+            echo "Error: No chart package found"
+            exit 1
+          fi
+
+          echo "Pushing chart: $CHART_PACKAGE"
+          echo "To: oci://${REGISTRY}/${REGISTRY_ALIAS}"
+
+          # Push to ECR as OCI artifact
+          helm push "$CHART_PACKAGE" "oci://${REGISTRY}/${REGISTRY_ALIAS}"
+
+          echo "✅ Helm chart published successfully!"
+          echo ""
+          echo "📦 Chart location:"
+          echo "   oci://${REGISTRY}/${REGISTRY_ALIAS}/${{ inputs.package_name }}"
+          echo ""
+          echo "📝 To use this chart:"
+          echo "   helm install my-release oci://${REGISTRY}/${REGISTRY_ALIAS}/${{ inputs.package_name }} --version ${{ inputs.version }}"
+
+      - name: Summary
+        run: |
+          echo "## Helm Chart Published 🚀" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Chart:** ${{ inputs.package_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Installation Command" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "helm install skypilot oci://${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}/${{ inputs.package_name }} \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --version ${{ inputs.version }} \\" >> $GITHUB_STEP_SUMMARY
+          echo "  --set apiService.image=your-image:tag" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
