@@ -658,7 +658,7 @@ candidate = Resources(cloud='runpod', region='IS', instance='gpu', accel={'A100'
 # Result: NOT BLOCKED ✓
 ```
 
-**Scenario 4: Different cloud**
+#### Scenario 4: Different cloud
 
 ```python
 blocked = Resources(cloud='runpod', region='IS', instance='gpu', accel={'L40S': 1})
