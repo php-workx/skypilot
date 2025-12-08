@@ -153,6 +153,11 @@ def up(
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(dag)
+
+    # Inject controller image if specified via environment variable
+    # Must be done before shared_controller_vars_to_fill() serializes the config
+    common_utils.set_controller_image(mutated_user_config, 'serve')
+
     dag.resolve_and_validate_volumes()
     dag.pre_mount_volumes()
     task = dag.tasks[0]

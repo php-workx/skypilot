@@ -658,7 +658,7 @@ candidate = Resources(cloud='runpod', region='IS', instance='gpu', accel={'A100'
 # Result: NOT BLOCKED ✓
 ```
 
-**Scenario 4: Different cloud**
+#### Scenario 4: Different cloud
 
 ```python
 blocked = Resources(cloud='runpod', region='IS', instance='gpu', accel={'L40S': 1})
@@ -1021,102 +1021,6 @@ class Resources:
 InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,GpuInfo,Region,SpotPrice,Price,AvailabilityZone
 ```
 
-### Debug Commands
 
-**Check catalog contents**:
-```bash
-cat ~/.sky/catalogs/v8/runpod/vms.csv | grep L40S
-```
 
-**Check catalog age**:
-```bash
-stat -f "%Sm" ~/.sky/catalogs/v8/runpod/vms.csv
-```
-
-**Force catalog refresh**:
-```bash
-rm ~/.sky/catalogs/v8/runpod/vms.csv
-sky show-gpus --cloud runpod
-```
-
-**View optimizer decisions** (enable debug logging):
-```bash
-export SKYPILOT_DEBUG=1
-sky launch test.yaml
-```
-
-**Check blocked resources** (in Python debugger):
-```python
-# Set breakpoint in sky/backends/cloud_vm_ray_backend.py
-print(self._blocked_resources)
-```
-
----
-
-## Conclusion
-
-### Summary of Key Insights
-
-**Pricing**:
-- CSV-based, locally cached, auto-updated (frequency varies by cloud)
-- Changes picked up immediately on next CLI command
-- MD5 protection preserves manual edits
-
-**Availability**:
-- RunPod: No real-time check, relies on static catalog
-- Other clouds: Real-time API queries (varies by provider)
-- First availability check happens at `create_pod()` call (too late for pre-filtering)
-
-**Multi-Region Failover**:
-- Works via auto-failover (Option 1): multiple Resources objects
-- Sequential: tries all zones in one region before moving to next
-- Region-specific blocking: doesn't block entire cloud
-
-**Blocking**:
-- Fine-grained: (cloud, region, instance, accelerators)
-- Conjunctive matching: ALL fields must match to block
-- Multiple regions of same cloud work correctly
-
-**RunPod L40S EU Challenge**:
-- No pre-check + high demand + limited inventory = frequent failures
-- Auto-failover helps but all regions may genuinely be empty
-- Solution: multi-cloud fallback + alternative GPUs + manual monitoring
-
-### Next Steps
-
-**If experiencing L40S unavailability**:
-1. Verify auto-failover config includes all EU regions
-2. Add other clouds (Vast, Lambda) as fallback
-3. Include alternative GPUs (A40, A100)
-4. Check RunPod console before launching
-5. Consider retry wrapper script
-
-**If contributing to SkyPilot**:
-1. Add pre-provisioning availability check for RunPod
-2. Expose availability API endpoint (if RunPod supports)
-3. Improve error messages to distinguish "no inventory" vs "provisioning failed"
-4. Add availability forecasting based on historical data
-
-**If debugging provisioning issues**:
-1. Check catalog age and contents
-2. Enable debug logging (`SKYPILOT_DEBUG=1`)
-3. Review provision logs for region attempt sequence
-4. Verify blocking behavior with multiple Resources objects
-
----
-
-**Document compiled from**:
-- `skypilot_pricing_architecture.md`
-- `skypilot_cloud_specifics.md`
-- `runpod_l40s_availability_analysis.md`
-- `skypilot_multiregion_analysis.md`
-- `BLOCKING_GRANULARITY_EXECUTIVE_SUMMARY.md`
-- `blocking_granularity_analysis.md`
-
-**All source code references verified against**: `/Users/runger/workspaces/amplifier/ai_working/skypilot/`
-
----
-
----
-
-*End of Complete Reference*
+<!-- End of Complete Reference -->
