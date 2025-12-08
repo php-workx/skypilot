@@ -1,5 +1,6 @@
 """Utils shared between all of sky"""
 
+import copy
 import ctypes
 import difflib
 import enum
@@ -17,13 +18,14 @@ import subprocess
 import sys
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 import uuid
 
 import jsonschema
 
 from sky import exceptions
 from sky import models
+from sky import resources as resources_lib
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
@@ -35,6 +37,8 @@ from sky.utils import validator
 if typing.TYPE_CHECKING:
     import jinja2
     import psutil
+
+    from sky import task as task_lib
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     psutil = adaptors_common.LazyImport('psutil')
@@ -1125,48 +1129,36 @@ def release_memory():
         return 0
 
 
-def set_controller_image(user_config: Dict[str, Any],
-                         controller_type: str) -> None:
-    """Inject controller image if SKYPILOT_CONTROLLER_IMAGE env var is set.
+def set_controller_image_for_controller_task(controller_task: 'task_lib.Task'):
+    """Inject controller image into controller task resources for Kubernetes.
 
-    This function modifies the user_config in-place to set the container image
-    for Kubernetes controllers (serve or jobs) if the SKYPILOT_CONTROLLER_IMAGE
-    environment variable is set. This allows controllers to use the same image
-    as the API server by default.
-
-    Args:
-        user_config: The user configuration dictionary to modify
-        controller_type: Type of controller ('serve' or 'jobs')
-
-    The function only modifies the config if:
-    1. SKYPILOT_CONTROLLER_IMAGE environment variable is set
-    2. The controller is configured to use Kubernetes cloud
-    3. User hasn't already specified custom containers in pod_config
+    The controller is always launched on Kubernetes when the API server runs
+    there, so we rewrite the controller task's cluster_config_overrides to set
+    the container image whenever SKYPILOT_CONTROLLER_IMAGE is present. We leave
+    user-provided containers untouched.
     """
     controller_image = os.environ.get('SKYPILOT_CONTROLLER_IMAGE')
     if not controller_image:
         return
 
-    # Check if this is a kubernetes controller
-    controller_cloud = user_config.get(controller_type,
-                                       {}).get('controller',
-                                               {}).get('resources',
-                                                       {}).get('cloud')
+    new_resources: Set[resources_lib.Resources] = set()
+    for resource in controller_task.resources:
+        resource = typing.cast(resources_lib.Resources, resource)
+        overrides = copy.deepcopy(resource.cluster_config_overrides)
+        spec = overrides.setdefault('kubernetes',
+                                    {}).setdefault('pod_config',
+                                                   {}).setdefault('spec', {})
 
-    if controller_cloud != 'kubernetes':
-        return
+        # Respect user-provided containers.
+        if spec.get('containers'):
+            new_resources.add(resource)
+            continue
 
-    # Only override if user hasn't already specified pod_config.spec.containers
-    user_containers = user_config.get('kubernetes',
-                                      {}).get('pod_config',
-                                              {}).get('spec',
-                                                      {}).get('containers')
+        spec['containers'] = [{
+            'name': 'ray-node',
+            'image': controller_image,
+        }]
+        new_resources.add(resource.copy(_cluster_config_overrides=overrides))
 
-    if user_containers:
-        return
-
-    # Set the controller image
-    k8s_config = user_config.setdefault('kubernetes', {})
-    pod_config = k8s_config.setdefault('pod_config', {})
-    spec = pod_config.setdefault('spec', {})
-    spec['containers'] = [{'name': 'ray-node', 'image': controller_image}]
+    if new_resources:
+        controller_task.set_resources(new_resources)

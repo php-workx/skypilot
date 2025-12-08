@@ -153,11 +153,6 @@ def up(
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(dag)
-
-    # Inject controller image if specified via environment variable
-    # Must be done before shared_controller_vars_to_fill() serializes the config
-    common_utils.set_controller_image(mutated_user_config, 'serve')
-
     dag.resolve_and_validate_volumes()
     dag.pre_mount_volumes()
     task = dag.tasks[0]
@@ -255,6 +250,9 @@ def up(
                 for r in controller_resources
             }
         controller_task.set_resources(controller_resources)
+
+        # Inject controller image into task's kubernetes config if provided.
+        common_utils.set_controller_image_for_controller_task(controller_task)
 
         # # Set service_name so the backend will know to modify default ray
         # task CPU usage to custom value instead of default 0.5 vCPU. We need
