@@ -1175,13 +1175,18 @@ def set_controller_image(user_config: Dict[str, Any],
     spec['containers'] = [{'name': 'ray-node', 'image': controller_image}]
 
 
-def set_controller_image_for_controller_task(controller_task: 'task_lib.Task'):
+def set_controller_image_for_controller_task(
+        controller_task: 'task_lib.Task') -> None:
     """Inject controller image into controller task resources for Kubernetes.
 
     The controller is always launched on Kubernetes when the API server runs
     there, so we rewrite the controller task's cluster_config_overrides to set
     the container image whenever SKYPILOT_CONTROLLER_IMAGE is present. We leave
     user-provided containers untouched.
+
+    Args:
+        controller_task: The task to modify. Its resources may be updated
+            in-place to include the controller container image.
     """
     controller_image = os.environ.get('SKYPILOT_CONTROLLER_IMAGE')
     if not controller_image:
