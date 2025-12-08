@@ -25,7 +25,6 @@ import jsonschema
 
 from sky import exceptions
 from sky import models
-from sky import resources as resources_lib
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
@@ -1140,6 +1139,10 @@ def set_controller_image_for_controller_task(controller_task: 'task_lib.Task'):
     controller_image = os.environ.get('SKYPILOT_CONTROLLER_IMAGE')
     if not controller_image:
         return
+
+    # Import here to avoid circular import
+    # pylint: disable=import-outside-toplevel
+    from sky import resources as resources_lib
 
     new_resources: Set[resources_lib.Resources] = set()
     for resource in controller_task.resources:
