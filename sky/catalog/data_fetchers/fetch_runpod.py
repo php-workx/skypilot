@@ -22,9 +22,8 @@ from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
 import requests
-from runpod.api import graphql
-
 import runpod
+from runpod.api import graphql
 
 # The API currently returns a dynamic number of vCPUs per pod that
 # changes frequently (less than 30 mins)

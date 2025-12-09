@@ -1,5 +1,6 @@
 """Utils shared between all of sky"""
 
+import copy
 import ctypes
 import difflib
 import enum
@@ -17,7 +18,7 @@ import subprocess
 import sys
 import time
 import typing
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 import uuid
 
 import jsonschema
@@ -35,6 +36,8 @@ from sky.utils import validator
 if typing.TYPE_CHECKING:
     import jinja2
     import psutil
+
+    from sky import task as task_lib
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
     psutil = adaptors_common.LazyImport('psutil')
@@ -1170,3 +1173,47 @@ def set_controller_image(user_config: Dict[str, Any],
     pod_config = k8s_config.setdefault('pod_config', {})
     spec = pod_config.setdefault('spec', {})
     spec['containers'] = [{'name': 'ray-node', 'image': controller_image}]
+
+
+def set_controller_image_for_controller_task(
+        controller_task: 'task_lib.Task') -> None:
+    """Inject controller image into controller task resources for Kubernetes.
+
+    The controller is always launched on Kubernetes when the API server runs
+    there, so we rewrite the controller task's cluster_config_overrides to set
+    the container image whenever SKYPILOT_CONTROLLER_IMAGE is present. We leave
+    user-provided containers untouched.
+
+    Args:
+        controller_task: The task to modify. Its resources may be updated
+            in-place to include the controller container image.
+    """
+    controller_image = os.environ.get('SKYPILOT_CONTROLLER_IMAGE')
+    if not controller_image:
+        return
+
+    # Import here to avoid circular import
+    # pylint: disable=import-outside-toplevel
+    from sky import resources as resources_lib
+
+    new_resources: Set[resources_lib.Resources] = set()
+    for resource in controller_task.resources:
+        resource = typing.cast(resources_lib.Resources, resource)
+        overrides = copy.deepcopy(resource.cluster_config_overrides)
+        spec = overrides.setdefault('kubernetes',
+                                    {}).setdefault('pod_config',
+                                                   {}).setdefault('spec', {})
+
+        # Respect user-provided containers.
+        if spec.get('containers'):
+            new_resources.add(resource)
+            continue
+
+        spec['containers'] = [{
+            'name': 'ray-node',
+            'image': controller_image,
+        }]
+        new_resources.add(resource.copy(_cluster_config_overrides=overrides))
+
+    if new_resources:
+        controller_task.set_resources(new_resources)

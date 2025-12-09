@@ -40,6 +40,11 @@ setup: |
   touch {{job_controller_indicator_file}}
 
 run: |
+  # Determine Python interpreter (use venv, fail if missing). Can be overridden
+  # via SKY_PYTHON_BIN.
+  export PYTHON_BIN=${SKY_PYTHON_BIN:-/home/sky/skypilot-runtime/bin/python}
+  command -v "$PYTHON_BIN" >/dev/null || { echo "Missing $PYTHON_BIN" >&2; exit 1; }
+
   {%- if consolidation_mode_job_id is none %}
   {{ sky_activate_python_env }}
   {%- endif %}
@@ -53,12 +58,7 @@ run: |
   # Note: The job is already in the `spot` table, marked as PENDING.
   # CloudVmRayBackend._exec_code_on_head() calls
   # managed_job_codegen.set_pending() before we get here.
-  {%- if consolidation_mode_job_id is not none %}
-  {{sky_python_cmd}} \
-  {%- else %}
-  python \
-  {%- endif %}
-    -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
+  env -u PYTHONPATH "$PYTHON_BIN" -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
     --user-yaml-path {{remote_original_user_yaml_path}} \
     {%- if consolidation_mode_job_id is not none %}
     --job-id {{consolidation_mode_job_id}} \

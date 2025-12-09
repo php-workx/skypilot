@@ -443,6 +443,10 @@ def launch(
             controller_task = task_lib.Task.from_yaml(yaml_path)
             controller_task.set_resources(controller_resources)
 
+            # Inject controller image into task's kubernetes config if provided.
+            common_utils.set_controller_image_for_controller_task(
+                controller_task)
+
             controller_task.managed_job_dag = dag_copy
             # pylint: disable=protected-access
             controller_task._metadata = metadata

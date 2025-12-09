@@ -256,6 +256,9 @@ def up(
             }
         controller_task.set_resources(controller_resources)
 
+        # Inject controller image into task's kubernetes config if provided.
+        common_utils.set_controller_image_for_controller_task(controller_task)
+
         # # Set service_name so the backend will know to modify default ray
         # task CPU usage to custom value instead of default 0.5 vCPU. We need
         # to set it to a smaller value to support a larger number of services.
