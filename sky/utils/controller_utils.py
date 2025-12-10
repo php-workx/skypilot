@@ -395,7 +395,7 @@ def _get_cloud_dependencies_installation_commands(
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
                 f'echo -en "\\r{step_prefix}cudoctl{empty_str}" && '
-                'wget https://download.cudocompute.com/cli/cudoctl-amd64.deb -O ~/cudoctl.deb && '  # pylint: disable=line-too-long
+                'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb && '  # pylint: disable=line-too-long
                 'sudo dpkg -i ~/cudoctl.deb || '
                 '(echo "\\nERROR: Failed to install cudoctl" && exit 1)')
         elif isinstance(cloud, clouds.IBM):
