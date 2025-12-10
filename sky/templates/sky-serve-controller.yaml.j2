@@ -54,13 +54,13 @@ run: |
   find ~/.sky -type f ! -name '*.pub' -exec chmod 600 {} \; 2>/dev/null || true
   find ~/.ssh -type f ! -name '*.pub' ! -name 'config' ! -name 'known_hosts' -exec chmod 600 {} \; 2>/dev/null || true
 
-    # Start sky serve service.
-  {%- if consolidation_mode_job_id is not none %}
+  # Start sky serve service.
+  {% if consolidation_mode_job_id is not none -%}
   {{sky_python_cmd}} \
-  {%- else %}
+  {% else -%}
   python \
-  {%- endif %}
-    -u -m sky.serve.service \
+  {% endif -%}
+  -u -m sky.serve.service \
     --service-name {{service_name}} \
     --task-yaml {{remote_task_yaml_path}} \
     --entrypoint {{entrypoint}} \
