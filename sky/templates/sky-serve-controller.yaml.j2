@@ -43,11 +43,6 @@ file_mounts:
 {%- endif %}
 
 run: |
-  # Determine Python interpreter (use venv, fail if missing). Can be overridden
-  # via SKY_PYTHON_BIN.
-  export PYTHON_BIN=${SKY_PYTHON_BIN:-$HOME/skypilot-runtime/bin/python}
-  command -v "$PYTHON_BIN" >/dev/null || { echo "Missing $PYTHON_BIN" >&2; exit 1; }
-
   # Activate the Python environment, so that cloud SDKs can be found in the
   # PATH.
   {%- if consolidation_mode_job_id is none %}
@@ -60,7 +55,12 @@ run: |
   find ~/.ssh -type f ! -name '*.pub' ! -name 'config' ! -name 'known_hosts' -exec chmod 600 {} \; 2>/dev/null || true
 
   # Start sky serve service.
-  env -u PYTHONPATH "$PYTHON_BIN" -u -m sky.serve.service \
+  {% if consolidation_mode_job_id is not none -%}
+  {{sky_python_cmd}} \
+  {% else -%}
+  python \
+  {% endif -%}
+  -u -m sky.serve.service \
     --service-name {{service_name}} \
     --task-yaml {{remote_task_yaml_path}} \
     --entrypoint {{entrypoint}} \

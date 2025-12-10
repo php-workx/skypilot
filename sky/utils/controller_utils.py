@@ -3,6 +3,7 @@ import copy
 import dataclasses
 import enum
 import os
+import shlex
 import tempfile
 import typing
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set
@@ -302,7 +303,7 @@ def _get_cloud_dependencies_installation_commands(
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
     commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" && '
                     f'{constants.SKY_UV_INSTALL_CMD} || '
-                    f'(echo "\\nERROR: Failed to install uv" && exit 1)')
+                    f'echo "\\nERROR: Failed to install uv"')
 
     enabled_compute_clouds = set(
         sky_check.get_cached_enabled_clouds_or_refresh(
@@ -311,6 +312,8 @@ def _get_cloud_dependencies_installation_commands(
         sky_check.get_cached_enabled_clouds_or_refresh(
             sky_cloud.CloudCapability.STORAGE))
     enabled_clouds = enabled_compute_clouds.union(enabled_storage_clouds)
+    logger.info('Controller deps install - enabled clouds: %s',
+                [repr(c) for c in enabled_clouds])
     enabled_k8s_and_ssh = [
         repr(cloud)
         for cloud in enabled_clouds
@@ -333,7 +336,7 @@ def _get_cloud_dependencies_installation_commands(
                 f'echo -en "\\r{step_prefix}azure-cli{empty_str}" && '
                 f'{constants.SKY_UV_PIP_CMD} install --prerelease=allow '
                 f'"{dependencies.AZURE_CLI}" || '
-                f'(echo "\\nERROR: Failed to install azure-cli" && exit 1)')
+                f'echo "\\nERROR: Failed to install azure-cli"')
         elif isinstance(cloud, clouds.GCP):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(f'echo -en "\\r{step_prefix}GCP SDK{empty_str}" &&'
@@ -394,7 +397,7 @@ def _get_cloud_dependencies_installation_commands(
                 f'echo -en "\\r{step_prefix}cudoctl{empty_str}" && '
                 'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb && '  # pylint: disable=line-too-long
                 'sudo dpkg -i ~/cudoctl.deb || '
-                '(echo "\\nERROR: Failed to install cudoctl" && exit 1)')
+                'echo "\\nERROR: Failed to install cudoctl"')
         elif isinstance(cloud, clouds.IBM):
             if controller != Controllers.JOBS_CONTROLLER:
                 # We only need IBM deps on the jobs controller.
@@ -408,12 +411,15 @@ def _get_cloud_dependencies_installation_commands(
             in storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()):
         python_packages.update(dependencies.extras_require['cloudflare'])
 
-    packages_string = ' '.join([f'"{package}"' for package in python_packages])
+    packages_string = ' '.join(
+        [shlex.quote(package) for package in python_packages])
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+    logger.info('Controller deps install - python packages: %s',
+                sorted(python_packages))
     commands.append(
         f'echo -en "\\r{step_prefix}cloud python packages{empty_str}" && '
         f'{constants.SKY_UV_PIP_CMD} install {packages_string} || '
-        f'(echo "\\nERROR: Failed to install cloud dependencies" && exit 1)')
+        f'echo "\\nERROR: Failed to install cloud dependencies"')
 
     total_commands = len(commands)
     finish_prefix = prefix_str.replace('[<step>/<total>] ', '  ')
