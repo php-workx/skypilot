@@ -311,6 +311,8 @@ def _get_cloud_dependencies_installation_commands(
         sky_check.get_cached_enabled_clouds_or_refresh(
             sky_cloud.CloudCapability.STORAGE))
     enabled_clouds = enabled_compute_clouds.union(enabled_storage_clouds)
+    logger.info('Controller deps install - enabled clouds: %s',
+                [repr(c) for c in enabled_clouds])
     enabled_k8s_and_ssh = [
         repr(cloud)
         for cloud in enabled_clouds
@@ -410,6 +412,8 @@ def _get_cloud_dependencies_installation_commands(
 
     packages_string = ' '.join([f'"{package}"' for package in python_packages])
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+    logger.info('Controller deps install - python packages: %s',
+                sorted(python_packages))
     commands.append(
         f'echo -en "\\r{step_prefix}cloud python packages{empty_str}" && '
         f'{constants.SKY_UV_PIP_CMD} install {packages_string} || '
