@@ -87,6 +87,7 @@ install_requires = [
     'types-paramiko',
     'alembic',
     'aiohttp',
+    'aiodns>=3.1.0,<3.5.0',  # 3.5.0+ has type hints requiring pycares>=4.4.0
     'anyio',
 ]
 
@@ -113,6 +114,7 @@ server_dependencies = [
     'passlib',
     'pyjwt',
     'aiohttp',
+    'aiodns>=3.1.0,<3.5.0',  # 3.5.0+ has type hints requiring pycares>=4.4.0
     'anyio',
     GRPC,
     PROTOBUF,
