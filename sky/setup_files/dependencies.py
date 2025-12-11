@@ -87,6 +87,7 @@ install_requires = [
     'types-paramiko',
     'alembic',
     'aiohttp',
+    'pycares<5.0.0',  # 5.0.0 removed ares_query_a_result, breaks aiodns
     'anyio',
 ]
 
@@ -113,6 +114,7 @@ server_dependencies = [
     'passlib',
     'pyjwt',
     'aiohttp',
+    'pycares<5.0.0',  # 5.0.0 removed ares_query_a_result, breaks aiodns
     'anyio',
     GRPC,
     PROTOBUF,
