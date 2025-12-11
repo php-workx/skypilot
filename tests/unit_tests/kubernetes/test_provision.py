@@ -492,3 +492,73 @@ def test_pod_termination_reason_kueue_preemption(monkeypatch):
         'Last known state: ContainersNotReady (containers with unready status: [ray-node]).'
     )
     assert reason == expected
+
+
+def test_query_instances_ignores_evicted_pods(monkeypatch):
+    """Test that query_instances filters out evicted pods from cluster status.
+
+    When Kubernetes evicts pods (e.g., due to low disk space), it leaves them
+    in Failed state. These should be filtered out during status queries to
+    prevent ClusterStatusFetchingError from duplicate node counts.
+    """
+    # Create a running pod
+    running_pod = mock.MagicMock()
+    running_pod.metadata.name = 'test-pod-running'
+    running_pod.metadata.deletion_timestamp = None
+    running_pod.metadata.labels = {
+        'skypilot-cluster': 'test-cluster-123',
+    }
+    running_pod.status.phase = 'Running'
+    running_pod.status.reason = None  # Running pods typically don't have a reason
+
+    # Create an evicted pod (same cluster)
+    evicted_pod = mock.MagicMock()
+    evicted_pod.metadata.name = 'test-pod-evicted'
+    evicted_pod.metadata.deletion_timestamp = None
+    evicted_pod.metadata.labels = {
+        'skypilot-cluster': 'test-cluster-123',
+    }
+    evicted_pod.status.phase = 'Failed'
+    evicted_pod.status.reason = 'Evicted'
+    evicted_pod.status.conditions = []
+    evicted_pod.status.container_statuses = None
+
+    # Mock Kubernetes API to return both pods
+    core_api_mock = mock.MagicMock()
+    pods_list = mock.MagicMock()
+    pods_list.items = [running_pod, evicted_pod]
+    core_api_mock.list_namespaced_pod.return_value = pods_list
+
+    # Mock logger to capture warnings
+    warning_output = []
+
+    def mock_warning(msg, *args, **kwargs):
+        if args:
+            msg = msg % args
+        warning_output.append(msg)
+
+    monkeypatch.setattr(logger, 'warning', mock_warning)
+    monkeypatch.setattr('sky.adaptors.kubernetes.core_api',
+                        lambda *args, **kwargs: core_api_mock)
+
+    # Call query_instances
+    result = instance.query_instances(cluster_name='test-cluster',
+                                      cluster_name_on_cloud='test-cluster-123',
+                                      provider_config={
+                                          'namespace': 'default',
+                                          'provider': {
+                                              'context': 'test-context'
+                                          },
+                                          'services': []
+                                      },
+                                      non_terminated_only=True)
+
+    # Assert: Only running pod in result, evicted pod filtered out
+    assert 'test-pod-running' in result
+    assert 'test-pod-evicted' not in result
+    assert len(result) == 1
+
+    # Assert: Warning was logged about evicted pod
+    assert len(warning_output) == 1
+    assert 'Ignoring evicted pod test-pod-evicted' in warning_output[0]
+    assert 'test-cluster' in warning_output[0]

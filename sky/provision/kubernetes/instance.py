@@ -1727,6 +1727,17 @@ def query_instances(
     for pod in pods:
         phase = pod.status.phase
         is_terminating = pod.metadata.deletion_timestamp is not None
+
+        # Skip evicted pods - these are stale and should be ignored
+        # Kubernetes evicts pods when resources are low and leaves them in
+        # Failed state. They should not be counted as active nodes.
+        if hasattr(pod.status, 'reason') and pod.status.reason == 'Evicted':
+            logger.warning(
+                f'Ignoring evicted pod {pod.metadata.name} in '
+                f'cluster {cluster_name}. Pod was evicted by '
+                'Kubernetes and should be cleaned up manually if needed.')
+            continue
+
         pod_status = status_map[phase]
         reason = None
         if phase in ('Failed', 'Unknown') or is_terminating:
