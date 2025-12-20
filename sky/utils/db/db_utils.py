@@ -74,6 +74,18 @@ def safe_cursor(db_path: str):
         conn.close()
 
 
+@contextlib.contextmanager
+def safe_cursor_on_connection(conn: 'sqlite3.Connection'):
+    """A auto-committing, auto-closing cursor on an existing connection."""
+    # Ensure commit() is called when the context is exited.
+    with conn:
+        cursor = conn.cursor()
+        try:
+            yield cursor
+        finally:
+            cursor.close()
+
+
 def add_column_to_table(
     cursor: 'sqlite3.Cursor',
     conn: 'sqlite3.Connection',
@@ -185,7 +197,7 @@ def add_column_to_table_sqlalchemy(
             pass
         else:
             raise
-    #postgressql
+    #postgresql
     except sqlalchemy_exc.ProgrammingError as e:
         if 'already exists' in str(e):
             pass
@@ -285,6 +297,11 @@ def drop_column_from_table_alembic(
             raise
 
 
+def fault_point():
+    """For test fault injection."""
+    pass
+
+
 class SQLiteConn(threading.local):
     """Thread-local connection to the sqlite3 database."""
 
@@ -344,8 +361,8 @@ class SQLiteConn(threading.local):
 
         def exec_and_commit(sql: str, parameters: Optional[Iterable[Any]]):
             # pylint: disable=protected-access
-            conn._conn.execute(sql, parameters)
-            conn._conn.commit()
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                cursor.execute(sql, parameters)
 
         # pylint: disable=protected-access
         await conn._execute(exec_and_commit, sql, parameters)
@@ -356,7 +373,20 @@ class SQLiteConn(threading.local):
                                      parameters: Optional[Iterable[Any]] = None
                                     ) -> Iterable[sqlite3.Row]:
         conn = await self._get_async_conn()
-        return await conn.execute_fetchall(sql, parameters)
+        if parameters is None:
+            parameters = []
+
+        def exec_fetch_all(sql: str, parameters: Optional[Iterable[Any]]):
+            # pylint: disable=protected-access
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                cursor.execute(sql, parameters)
+                # Note(dev): sqlite3.Connection cannot be patched, keep
+                # fault_point here to test the integrity of exec_fetch_all()
+                fault_point()
+                return cursor.fetchall()
+
+        # pylint: disable=protected-access
+        return await conn._execute(exec_fetch_all, sql, parameters)
 
     async def execute_get_returning_value_async(
             self,
@@ -371,9 +401,9 @@ class SQLiteConn(threading.local):
         def exec_and_get_returning_value(sql: str,
                                          parameters: Optional[Iterable[Any]]):
             # pylint: disable=protected-access
-            row = conn._conn.execute(sql, parameters).fetchone()
-            conn._conn.commit()
-            return row
+            with safe_cursor_on_connection(conn._conn) as cursor:
+                cursor.execute(sql, parameters)
+                return cursor.fetchone()
 
         # pylint: disable=protected-access
         return await conn._execute(exec_and_get_returning_value, sql,
@@ -432,29 +462,41 @@ def get_engine(
         if async_engine:
             conn_string = conn_string.replace('postgresql://',
                                               'postgresql+asyncpg://')
-            # This is an AsyncEngine, instead of a (normal, synchronous) Engine,
-            # so we should not put it in the cache. Instead, just return.
-            return sqlalchemy_async.create_async_engine(
-                conn_string, poolclass=sqlalchemy.NullPool)
         with _db_creation_lock:
+            # We use the same cache for both sync and async engines
+            # because we change the conn_string in the async case,
+            # so they would not overlap.
             if conn_string not in _postgres_engine_cache:
-                logger.debug('Creating a new postgres engine with '
-                             f'maximum {_max_connections} connections')
+                engine_type = 'sync' if not async_engine else 'async'
+                logger.debug(
+                    f'Creating a new postgres {engine_type} engine with '
+                    f'maximum {_max_connections} connections')
                 if _max_connections == 0:
-                    _postgres_engine_cache[conn_string] = (
-                        sqlalchemy.create_engine(
-                            conn_string, poolclass=sqlalchemy.pool.NullPool))
-                elif _max_connections == 1:
-                    _postgres_engine_cache[conn_string] = (
-                        sqlalchemy.create_engine(
-                            conn_string, poolclass=sqlalchemy.pool.StaticPool))
+                    kw_args = {'poolclass': sqlalchemy.NullPool}
+                    if async_engine:
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy_async.create_async_engine(
+                                conn_string, **kw_args))
+                    else:
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy.create_engine(conn_string, **kw_args))
                 else:
-                    _postgres_engine_cache[conn_string] = (
-                        sqlalchemy.create_engine(
-                            conn_string,
-                            poolclass=sqlalchemy.pool.QueuePool,
-                            size=_max_connections,
-                            max_overflow=0))
+                    kw_args = {
+                        'pool_size': _max_connections,
+                        'max_overflow': max(0, 5 - _max_connections),
+                        'pool_pre_ping': True,
+                        'pool_recycle': 1800
+                    }
+                    if async_engine:
+                        kw_args[
+                            'poolclass'] = sqlalchemy.pool.AsyncAdaptedQueuePool
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy_async.create_async_engine(
+                                conn_string, **kw_args))
+                    else:
+                        kw_args['poolclass'] = sqlalchemy.pool.QueuePool
+                        _postgres_engine_cache[conn_string] = (
+                            sqlalchemy.create_engine(conn_string, **kw_args))
             engine = _postgres_engine_cache[conn_string]
     else:
         assert db_name is not None, 'db_name must be provided for SQLite'

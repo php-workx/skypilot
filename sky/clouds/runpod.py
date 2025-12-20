@@ -55,7 +55,9 @@ class RunPod(clouds.Cloud):
 
     @classmethod
     def _unsupported_features_for_resources(
-        cls, resources: 'resources_lib.Resources'
+        cls,
+        resources: 'resources_lib.Resources',
+        region: Optional[str] = None,
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
         """The features not supported based on the resources provided.
 
@@ -74,42 +76,18 @@ class RunPod(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    def regions_with_offering(cls, instance_type: str,
-                              accelerators: Optional[Dict[str, int]],
-                              use_spot: bool, region: Optional[str],
-                              zone: Optional[str]) -> List[clouds.Region]:
-        if accelerators is None:
-            regions = catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'runpod')
-        else:
-            assert len(accelerators) == 1, accelerators
-            acc = list(accelerators.keys())[0]
-            acc_count = list(accelerators.values())[0]
-            acc_regions = catalog.get_region_zones_for_accelerators(
-                acc, acc_count, use_spot, clouds='runpod')
-            if instance_type is None:
-                regions = acc_regions
-            else:
-                vm_regions = catalog.get_region_zones_for_instance_type(
-                    instance_type, use_spot, 'runpod')
-                # Find the intersection between acc_regions and vm_regions
-                regions = []
-                for r1 in acc_regions:
-                    for r2 in vm_regions:
-                        if r1.name != r2.name:
-                            continue
-                        assert r1.zones is not None, r1
-                        assert r2.zones is not None, r2
-                        zones = []
-                        for z1 in r1.zones:
-                            for z2 in r2.zones:
-                                if z1.name == z2.name:
-                                    zones.append(z1)
-                                    break
-                        if zones:
-                            r1_copy = clouds.Region(r1.name)
-                            r1_copy.set_zones(zones)
-                            regions.append(r1_copy)
+    def regions_with_offering(
+        cls,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]],
+        use_spot: bool,
+        region: Optional[str],
+        zone: Optional[str],
+        resources: Optional['resources_lib.Resources'] = None,
+    ) -> List[clouds.Region]:
+        del accelerators  # unused
+        regions = catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'runpod')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -224,7 +202,7 @@ class RunPod(clouds.Cloud):
             acc_dict)
 
         if resources.image_id is None:
-            image_id: Optional[str] = 'runpod/base:0.0.2'
+            image_id: Optional[str] = 'runpod/base:1.0.2-ubuntu2204'
         elif resources.extract_docker_image() is not None:
             image_id = resources.extract_docker_image()
         else:

@@ -55,6 +55,8 @@ from sky.server import config as server_config
 from sky.server import constants as server_constants
 from sky.server import daemons
 from sky.server import metrics
+from sky.server import middleware_utils
+from sky.server import server_utils
 from sky.server import state
 from sky.server import stream_utils
 from sky.server import versions
@@ -76,7 +78,9 @@ from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import context
 from sky.utils import context_utils
+from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import env_options
 from sky.utils import perf_utils
 from sky.utils import status_lib
 from sky.utils import subprocess_utils
@@ -138,6 +142,7 @@ def _try_set_basic_auth_user(request: fastapi.Request):
             break
 
 
+@middleware_utils.websocket_aware
 class RBACMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle RBAC."""
 
@@ -170,8 +175,6 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         request_id = requests_lib.get_new_request_id()
         request.state.request_id = request_id
         response = await call_next(request)
-        # TODO(syang): remove X-Request-ID when v0.10.0 is released.
-        response.headers['X-Request-ID'] = request_id
         response.headers['X-Skypilot-Request-ID'] = request_id
         return response
 
@@ -187,6 +190,7 @@ def _get_auth_user_header(request: fastapi.Request) -> Optional[models.User]:
     return models.User(id=user_hash, name=user_name)
 
 
+@middleware_utils.websocket_aware
 class InitializeRequestAuthUserMiddleware(
         starlette.middleware.base.BaseHTTPMiddleware):
 
@@ -197,6 +201,7 @@ class InitializeRequestAuthUserMiddleware(
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle HTTP Basic Auth."""
 
@@ -248,6 +253,7 @@ class BasicAuthMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle Bearer Token Auth (Service Accounts)."""
 
@@ -375,6 +381,7 @@ class BearerTokenMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class AuthProxyMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to handle auth proxy."""
 
@@ -464,7 +471,8 @@ async def schedule_on_boot_check_async():
         await executor.schedule_request_async(
             request_id='skypilot-server-on-boot-check',
             request_name=request_names.RequestName.CHECK,
-            request_body=payloads.CheckBody(),
+            request_body=server_utils.build_body_at_server(
+                request=None, body_type=payloads.CheckBody),
             func=sky_check.check,
             schedule_type=requests_lib.ScheduleType.SHORT,
             is_skypilot_system=True,
@@ -487,7 +495,8 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             await executor.schedule_request_async(
                 request_id=event.id,
                 request_name=event.name,
-                request_body=payloads.RequestBody(),
+                request_body=server_utils.build_body_at_server(
+                    request=None, body_type=payloads.RequestBody),
                 func=event.run_event,
                 schedule_type=requests_lib.ScheduleType.SHORT,
                 is_skypilot_system=True,
@@ -549,6 +558,7 @@ class PathCleanMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to control requests when server is shutting down."""
 
@@ -568,6 +578,7 @@ class GracefulShutdownMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return await call_next(request)
 
 
+@middleware_utils.websocket_aware
 class APIVersionMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
     """Middleware to add API version to the request."""
 
@@ -623,8 +634,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=['*'],
     allow_headers=['*'],
-    # TODO(syang): remove X-Request-ID \when v0.10.0 is released.
-    expose_headers=['X-Request-ID', 'X-Skypilot-Request-ID'])
+    expose_headers=['X-Skypilot-Request-ID'])
 # The order of all the authentication-related middleware is important.
 # RBACMiddleware must precede all the auth middleware, so it can access
 # request.state.auth_user.
@@ -659,16 +669,6 @@ app.include_router(ssh_node_pools_rest.router,
 # increase the resource limit for the server
 soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
-
-# Increase the limit of files we can open to our hard limit. This fixes bugs
-# where we can not aquire file locks or open enough logs and the API server
-# crashes. On Mac, the hard limit is 9,223,372,036,854,775,807.
-# TODO(luca) figure out what to do if we need to open more than 2^63 files.
-try:
-    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-    resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
-except Exception:  # pylint: disable=broad-except
-    pass  # no issue, we will warn the user later if its too low
 
 
 @app.exception_handler(exceptions.ConcurrentWorkerExhaustedError)
@@ -750,8 +750,11 @@ async def enabled_clouds(request: fastapi.Request,
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ENABLED_CLOUDS,
-        request_body=payloads.EnabledCloudsBody(workspace=workspace,
-                                                expand=expand),
+        request_body=server_utils.build_body_at_server(
+            request=request,
+            body_type=payloads.EnabledCloudsBody,
+            workspace=workspace,
+            expand=expand),
         func=core.enabled_clouds,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -790,11 +793,13 @@ async def kubernetes_node_info(
 
 @app.get('/status_kubernetes')
 async def status_kubernetes(request: fastapi.Request) -> None:
-    """Gets Kubernetes status."""
+    """[Experimental] Get all SkyPilot resources (including from other '
+    'users) in the current Kubernetes context."""
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STATUS_KUBERNETES,
-        request_body=payloads.RequestBody(),
+        request_body=server_utils.build_body_at_server(
+            request=request, body_type=payloads.RequestBody),
         func=core.status_kubernetes,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -856,6 +861,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # server thread.
         with admin_policy_utils.apply_and_use_config_in_current_request(
                 dag,
+                request_name=request_names.AdminPolicyRequestName.VALIDATE,
                 request_options=validate_body.get_request_options()) as dag:
             dag.resolve_and_validate_volumes()
             # Skip validating workdir and file_mounts, as those need to be
@@ -869,6 +875,11 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
         # thread executor to avoid blocking the uvicorn event loop.
         await context_utils.to_thread(validate_dag, dag)
     except Exception as e:  # pylint: disable=broad-except
+        # Print the exception to the API server log.
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            logger.info('/validate exception:', exc_info=True)
+        # Set the exception stacktrace for the serialized exception.
+        requests_lib.set_exception_stacktrace(e)
         raise fastapi.HTTPException(
             status_code=400, detail=exceptions.serialize_exception(e)) from e
 
@@ -1457,7 +1468,8 @@ async def storage_ls(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.STORAGE_LS,
-        request_body=payloads.RequestBody(),
+        request_body=server_utils.build_body_at_server(
+            request=request, body_type=payloads.RequestBody),
         func=core.storage_ls,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -2004,7 +2016,8 @@ async def all_contexts(request: fastapi.Request) -> None:
     await executor.schedule_request_async(
         request_id=request.state.request_id,
         request_name=request_names.RequestName.ALL_CONTEXTS,
-        request_body=payloads.RequestBody(),
+        request_body=server_utils.build_body_at_server(
+            request=request, body_type=payloads.RequestBody),
         func=core.get_all_contexts,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
@@ -2161,8 +2174,21 @@ if __name__ == '__main__':
 
     max_db_connections = global_user_state.get_max_db_connections()
     logger.info(f'Max db connections: {max_db_connections}')
-    config = server_config.compute_server_config(cmd_args.deploy,
-                                                 max_db_connections)
+
+    # Reserve memory for jobs and serve/pool controller in consolidation mode.
+    reserved_memory_mb = (
+        controller_utils.compute_memory_reserved_for_controllers(
+            reserve_for_controllers=os.environ.get(
+                constants.OVERRIDE_CONSOLIDATION_MODE) is not None,
+            # For jobs controller, we need to reserve for both jobs and
+            # pool controller.
+            reserve_extra_for_pool=not os.environ.get(
+                constants.IS_SKYPILOT_SERVE_CONTROLLER)))
+
+    config = server_config.compute_server_config(
+        cmd_args.deploy,
+        max_db_connections,
+        reserved_memory_mb=reserved_memory_mb)
 
     num_workers = config.num_server_workers
 
