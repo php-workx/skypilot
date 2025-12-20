@@ -2,8 +2,9 @@
 
 **Purpose:** Track all intentional modifications to the SkyPilot codebase for easier upgrades.
 
-**Last Updated:** 2025-12-03
+**Last Updated:** 2025-12-20
 **Base Version:** v0.10.5
+**Next Upgrade Target:** v0.11.1 (208 commits)
 
 ---
 
@@ -273,6 +274,171 @@ def _load_cudo_api_module():
 
 ---
 
+### Controller Image Override 🟢 KEEP ALWAYS
+
+**Description:** Allow custom Docker images for SkyPilot controllers via environment variable.
+
+**Commits:**
+- `6206a8690` - feat: add SKYPILOT_CONTROLLER_IMAGE support and fix controller Python interpreter (#18)
+- `b01331e51` - feat(serve): set controller container (#17)
+
+**Files:**
+- `sky/utils/common_utils.py` 🟢 (added functions)
+  - `inject_controller_image_config()` - Injects controller image from env var
+- `sky/jobs/server/core.py` 🟡 (modified)
+  - Calls `inject_controller_image_config()` for jobs controller
+- `sky/serve/server/impl.py` 🟡 (modified)
+  - Calls `inject_controller_image_config()` for serve controller
+- `sky/templates/jobs-controller.yaml.j2` 🟡 (modified)
+  - Uses `$HOME` instead of hardcoded `/home/sky`
+  - Properly quotes Python package specifiers
+- `sky/templates/sky-serve-controller.yaml.j2` 🟡 (modified)
+  - Uses `$HOME` instead of hardcoded `/home/sky`
+  - Properly quotes Python package specifiers
+
+**Environment Variables:**
+- `SKYPILOT_CONTROLLER_IMAGE` - Custom Docker image for Kubernetes controllers
+
+**Changes:**
+```python
+def inject_controller_image_config(user_config: Dict, controller_type: str):
+    """Inject controller image if SKYPILOT_CONTROLLER_IMAGE env var is set.
+
+    This allows controllers to use the same image as the API server by default.
+    Only applies to Kubernetes controllers.
+    """
+    controller_image = os.environ.get('SKYPILOT_CONTROLLER_IMAGE')
+    if not controller_image:
+        return
+
+    # Check if this is a kubernetes controller and user hasn't specified custom containers
+    # ... inject image into user_config
+```
+
+**Merge Strategy:**
+- Always keep our version (custom feature)
+- Check if upstream added similar functionality
+- Template files: merge our fixes with upstream changes
+
+**Test:** Set `SKYPILOT_CONTROLLER_IMAGE=custom:tag` and verify controllers use it
+
+---
+
+### Controller Dependency Installation Fixes 🟡 MERGE CAREFULLY
+
+**Description:** Improved error surfacing and package installation in controllers.
+
+**Commits:**
+- `a2c091a26` - fix(serve controller): surface dependency installation errors (#14)
+- `700267714` - fix: missing python packages (#20)
+- `8e2826bfb` - fix: use $HOME instead of hardcoded /home/sky for controller Python path (#19)
+
+**Files:**
+- `sky/utils/controller_utils.py` 🟡 (modified)
+  - Better error handling for dependency installation
+  - Proper shell quoting for package specifiers
+  - No hard exit on install step errors
+- `sky/templates/jobs-controller.yaml.j2` 🟡 (modified)
+  - Use `$HOME` instead of `/home/sky`
+  - Use `shlex.quote()` for package specifiers
+- `sky/templates/sky-serve-controller.yaml.j2` 🟡 (modified)
+  - Use `$HOME` instead of `/home/sky`
+  - Use `shlex.quote()` for package specifiers
+- `tests/unit_tests/test_controller_utils.py` 🟡 (modified)
+  - Updated tests
+
+**Changes:**
+```python
+# Before:
+python_path = '/home/sky/.local/bin/python'
+install_cmd = f'pip install {package}'  # Breaks with version specifiers
+
+# After:
+python_path = f'{os.environ["HOME"]}/.local/bin/python'
+import shlex
+install_cmd = f'pip install {shlex.quote(package)}'  # Safe for 'foo[extra]>=1.0'
+```
+
+**Merge Strategy:**
+- Check if upstream fixed these issues
+- If yes: accept upstream
+- If no: keep our fixes
+- These are clear bug fixes that could be upstreamed
+
+**Test:**
+1. Install packages with version specifiers: `foo[extra]>=1.0.0`
+2. Verify proper error messages on installation failure
+3. Test with non-standard home directories
+
+---
+
+### Kubernetes Evicted Pods Fix 🟡 MERGE CAREFULLY
+
+**Description:** Ignore evicted pods when checking Kubernetes cluster status.
+
+**Commits:**
+- `0c26e5883` - fix(k8s): ignore evicted pods (#21)
+
+**Files:**
+- `sky/provision/kubernetes/instance.py` 🟡 (modified)
+  - Filter out evicted pods from status checks
+- `tests/unit_tests/kubernetes/test_provision.py` 🟡 (modified)
+  - Added test cases for evicted pods
+
+**Changes:**
+```python
+def get_kubernetes_pods(namespace, label_selector):
+    """Get Kubernetes pods, filtering out evicted ones."""
+    pods = api.list_namespaced_pod(namespace, label_selector=label_selector)
+    # Filter out evicted pods - they're not running and shouldn't count
+    active_pods = [p for p in pods.items if p.status.phase != 'Evicted']
+    return active_pods
+```
+
+**Problem:**
+Evicted pods (due to resource pressure) were being counted as "active", causing provision logic to fail or hang.
+
+**Merge Strategy:**
+- Check if upstream fixed this (likely a common issue)
+- If yes: accept upstream
+- If no: keep our fix
+- This is a clear bug fix suitable for upstream
+
+**Test:**
+1. Create pods that get evicted
+2. Verify SkyPilot doesn't count them as active
+3. Provision should succeed despite evicted pods
+
+---
+
+### Dependency Compatibility Fixes 🟡 MERGE CAREFULLY
+
+**Description:** Fix incompatibility between aiodns and pycares versions.
+
+**Commits:**
+- `b91b33366` - fix(deps): incompatibility between aiodns and pycares (#22)
+
+**Files:**
+- `sky/setup_files/dependencies.py` 🟡 (modified)
+  - Pin compatible versions
+
+**Changes:**
+```python
+# Added version constraints to prevent incompatibility
+'aiodns>=3.0.0',
+'pycares>=4.0.0',  # Must be compatible with aiodns
+```
+
+**Merge Strategy:**
+- Check if upstream fixed this dependency issue
+- If yes: accept upstream (they maintain dependencies)
+- If no: keep our pin but verify compatibility
+- **Generally accept upstream for dependencies.py**
+
+**Test:** Install with our constraints, verify no version conflicts
+
+---
+
 ### Seeweb Provider 🔵 REVIEW & DECIDE
 
 **Description:** Support for Seeweb cloud provider.
@@ -385,6 +551,13 @@ def _load_cudo_api_module():
 - `sky/clouds/runpod.py` - Availability filtering
 - `sky/clouds/cudo.py` - Python 3.10 compat
 - `sky/serve/service.py` - Orphaned replica cleanup
+- `sky/utils/common_utils.py` - Controller image injection
+- `sky/utils/controller_utils.py` - Dependency installation fixes
+- `sky/provision/kubernetes/instance.py` - Evicted pods handling
+- `sky/jobs/server/core.py` - Controller image config
+- `sky/serve/server/impl.py` - Controller image config
+- `sky/templates/jobs-controller.yaml.j2` - Controller template fixes
+- `sky/templates/sky-serve-controller.yaml.j2` - Controller template fixes
 
 **Usually Accept Theirs:**
 - `sky/__init__.py` - Just add new cloud imports
@@ -450,6 +623,9 @@ When upgrading to a new version:
   - [ ] RunPod availability filtering
   - [ ] Serve orphaned replica cleanup
   - [ ] Cudo on Python 3.10
+  - [ ] Controller image override (`SKYPILOT_CONTROLLER_IMAGE`)
+  - [ ] Kubernetes evicted pods handling
+  - [ ] Controller dependency installation with version specifiers
   - [ ] Seeweb (using upstream)
 - [ ] Update this file with new version and changes
 - [ ] Update `fork/CUSTOMIZATIONS.md` if features changed
@@ -458,6 +634,20 @@ When upgrading to a new version:
 ---
 
 ## Version History
+
+### Current: v0.10.5 + Custom Commits #13-22 (2025-12-20)
+
+**Post-v0.10.5 Custom Changes:**
+- ✅ Controller image override via `SKYPILOT_CONTROLLER_IMAGE` (#17, #18)
+- ✅ Controller dependency installation fixes (#14, #19, #20)
+- ✅ Kubernetes evicted pods fix (#21)
+- ✅ Dependency compatibility fixes (#22)
+- ✅ Orphaned replica cleanup (#15) - already documented
+
+**Total Custom Commits Since v0.10.5:** 9 commits (#13-22)
+**Next Target:** v0.11.1 (208 commits from v0.10.5)
+
+---
 
 ### v0.10.5 (2025-11-22)
 
