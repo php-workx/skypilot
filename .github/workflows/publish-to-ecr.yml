@@ -20,7 +20,7 @@ on:
 
 env:
   AWS_REGION: eu-central-1
-  SKYPILOT_BASE_VERSION: '0.10.5'
+  SKYPILOT_BASE_VERSION: '0.11.1'
   # ECR_REGISTRY will be set dynamically from AWS account
 
 jobs:
@@ -30,6 +30,19 @@ jobs:
     permissions:
       id-token: write  # Required for OIDC authentication
       contents: write
+    strategy:
+      matrix:
+        image:
+          - name: api-server
+            dockerfile: Dockerfile
+            context: .
+            repository: ojin/skypilot
+            description: API Server image
+          - name: k8s-cpu
+            dockerfile: Dockerfile_k8s
+            context: ./sky
+            repository: ojin/skypilot-k8s
+            description: K8s CPU Runtime image
 
     steps:
       - name: Checkout repository
@@ -96,11 +109,13 @@ jobs:
         id: ecr-repo
         run: |
           ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
-          ECR_REPOSITORY="ojin/skypilot"
+          ECR_REPOSITORY="${{ matrix.image.repository }}"
           echo "registry=${ECR_REGISTRY}" >> $GITHUB_OUTPUT
           echo "repository=${ECR_REPOSITORY}" >> $GITHUB_OUTPUT
           echo "ECR Registry: ${ECR_REGISTRY}"
           echo "ECR Repository: ${ECR_REPOSITORY}"
+          echo "Image Type: ${{ matrix.image.name }}"
+          echo "Description: ${{ matrix.image.description }}"
 
       - name: Generate image tags
         id: tags
@@ -128,22 +143,33 @@ jobs:
           echo "Image tags:"
           echo "${TAGS}" | tr ',' '\n'
 
-      - name: Build and push Docker image
+      - name: Prepare build args
+        id: build-args
+        run: |
+          ARGS="TARGETARCH=amd64"
+          if [ "${{ matrix.image.name }}" = "api-server" ]; then
+            ARGS="${ARGS}
+          INSTALL_FROM_SOURCE=true
+          NEXT_BASE_PATH=/dashboard"
+          fi
+          echo "args<<EOF" >> $GITHUB_OUTPUT
+          echo "${ARGS}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Build and push ${{ matrix.image.description }}
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ./Dockerfile
+          context: ${{ matrix.image.context }}
+          file: ./${{ matrix.image.dockerfile }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.tags.outputs.tags }}
-          build-args: |
-            INSTALL_FROM_SOURCE=true
-            NEXT_BASE_PATH=/dashboard
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-args: ${{ steps.build-args.outputs.args }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
           labels: |
-            org.opencontainers.image.title=Ojin SkyPilot
-            org.opencontainers.image.description=Custom SkyPilot with various improvements
+            org.opencontainers.image.title=Ojin SkyPilot - ${{ matrix.image.description }}
+            org.opencontainers.image.description=Custom SkyPilot with various improvements (${{ matrix.image.name }})
             org.opencontainers.image.version=${{ env.VERSION_TAG }}
             org.opencontainers.image.source=${{ github.repository }}
             org.opencontainers.image.revision=${{ steps.commit_info.outputs.sha }}
@@ -153,7 +179,7 @@ jobs:
         run: echo "Built and pushed image with tags ${{ steps.tags.outputs.tags }}"
 
       - name: Create git tag
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && matrix.image.name == 'api-server'
         run: |
           set -euo pipefail
           VERSION_TAG="${VERSION_TAG:?VERSION_TAG not set}"
@@ -171,11 +197,13 @@ jobs:
       - name: Create deployment summary
         run: |
           cat >> $GITHUB_STEP_SUMMARY <<EOF
-          ## 🚀 Docker Image Build Summary
+          ## 🚀 Docker Image Build Summary - ${{ matrix.image.description }}
 
           **Status**: ✅ Success
 
           ### Image Details
+          - **Image Type**: \`${{ matrix.image.name }}\`
+          - **Repository**: \`${{ matrix.image.repository }}\`
           - **Primary Tag**: \`${{ steps.tags.outputs.primary_tag }}\`
           - **Commit**: \`${{ steps.commit_info.outputs.sha }}\`
           - **Date**: \`${{ steps.commit_info.outputs.date }}\`

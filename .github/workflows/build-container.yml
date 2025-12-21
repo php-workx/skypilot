@@ -22,16 +22,29 @@ jobs:
         with:
           platforms: linux/amd64
 
-      - name: Build Docker image
+      - name: Build API Server image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           platforms: linux/amd64
           push: false
-          tags: ojin/skypilot-custom:test
+          tags: ojin/skypilot:test
           build-args: |
             INSTALL_FROM_SOURCE=true
             NEXT_BASE_PATH=/dashboard
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=api-server
+          cache-to: type=gha,mode=max,scope=api-server
+
+      - name: Build K8s CPU image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./sky
+          file: ./Dockerfile_k8s
+          platforms: linux/amd64
+          push: false
+          tags: ojin/skypilot-k8s:test
+          build-args: |
+            TARGETARCH=amd64
+          cache-from: type=gha,scope=k8s-cpu
+          cache-to: type=gha,mode=max,scope=k8s-cpu

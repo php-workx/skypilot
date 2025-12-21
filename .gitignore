@@ -20,3 +20,6 @@ sky/clouds/service_catalog/data_fetchers/*.csv
 .coverage
 /uv.lock
 /docs/ojin/
+
+
+rate_limit.db
