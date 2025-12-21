@@ -143,6 +143,19 @@ jobs:
           echo "Image tags:"
           echo "${TAGS}" | tr ',' '\n'
 
+      - name: Prepare build args
+        id: build-args
+        run: |
+          ARGS="TARGETARCH=amd64"
+          if [ "${{ matrix.image.name }}" = "api-server" ]; then
+            ARGS="${ARGS}
+          INSTALL_FROM_SOURCE=true
+          NEXT_BASE_PATH=/dashboard"
+          fi
+          echo "args<<EOF" >> $GITHUB_OUTPUT
+          echo "${ARGS}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Build and push ${{ matrix.image.description }}
         uses: docker/build-push-action@v5
         with:
@@ -151,12 +164,9 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.tags.outputs.tags }}
-          build-args: |
-            TARGETARCH=amd64
-            ${{ matrix.image.name == 'api-server' && 'INSTALL_FROM_SOURCE=true' || '' }}
-            ${{ matrix.image.name == 'api-server' && 'NEXT_BASE_PATH=/dashboard' || '' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-args: ${{ steps.build-args.outputs.args }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
           labels: |
             org.opencontainers.image.title=Ojin SkyPilot - ${{ matrix.image.description }}
             org.opencontainers.image.description=Custom SkyPilot with various improvements (${{ matrix.image.name }})
