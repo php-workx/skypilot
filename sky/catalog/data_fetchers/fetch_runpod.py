@@ -1,14 +1,28 @@
 """A script that generates the Runpod catalog.
 
 Usage:
-    python fetch_runpod.py [-h] [--output-dir OUTPUT_DIR] [--gpu-ids GPU_IDS]
+    python fetch_runpod.py [-h] [--output-dir OUTPUT_DIR] [--no-gpu] [--no-cpu]
+                           [--no-filter-available]
 
 The RUNPOD_API_KEY environment variable must be set with a valid read-access
 RunPod API key.
 
-If --gpu-ids is provided, only fetches details for
-the specified GPU IDs (comma-separated). Otherwise, fetches all available GPUs.
-This flag is intended for testing and debugging individual GPU configurations.
+Options:
+    --no-gpu: Skip fetching GPU instances
+    --no-cpu: Skip fetching CPU instances
+    --no-filter-available: Include all GPUs regardless of stock availability.
+                          By default, the script filters out GPUs with no
+                          regional stock to prevent provisioning failures.
+                          Use this for debugging or to see the full catalog.
+
+Regional Availability Filtering:
+    By default, this script queries the RunPod API for regional stock status
+    and only includes GPU instances that are actually available. This prevents
+    the catalog from showing GPUs that cannot be provisioned.
+
+    The filtering is fail-open: if regional availability cannot be determined
+    (e.g., API errors), the GPU is excluded from that region but the script
+    continues processing other regions.
 """
 
 import argparse
@@ -16,6 +30,7 @@ import json
 import os
 import sys
 import traceback
+from functools import lru_cache
 from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
@@ -271,6 +286,80 @@ REGION_ZONES = {
         'US-WA-1',
     ],
 }
+
+# Region to country code mapping for availability checks
+# Maps RunPod region keys to ISO country codes for regional stock queries
+REGION_COUNTRY_CODES = {
+    'EU-RO-1': 'RO',  # Romania
+    'EUR-IS-1': 'IS',  # Iceland
+    'EUR-IS-2': 'IS',  # Iceland
+    'EUR-IS-3': 'IS',  # Iceland
+    'CA-MTL-1': 'CA',  # Canada - Montreal
+    'CA-MTL-2': 'CA',  # Canada - Montreal
+    'CA-MTL-3': 'CA',  # Canada - Montreal
+    'US-CA-1': 'US',  # USA - California
+    'US-CA-2': 'US',  # USA - California
+    'US-DE-1': 'US',  # USA - Delaware
+    'US-GA-1': 'US',  # USA - Georgia
+    'US-GA-2': 'US',  # USA - Georgia
+    'US-IL-1': 'US',  # USA - Illinois
+    'US-KS-1': 'US',  # USA - Kansas
+    'US-KS-2': 'US',  # USA - Kansas
+    'US-NC-1': 'US',  # USA - North Carolina
+    'US-TX-1': 'US',  # USA - Texas
+    'US-TX-2': 'US',  # USA - Texas
+    'US-TX-3': 'US',  # USA - Texas
+    'US-TX-4': 'US',  # USA - Texas
+    'US-WA-1': 'US',  # USA - Washington
+    'EU-CZ-1': 'CZ',  # Czech Republic
+    'EU-NL-1': 'NL',  # Netherlands
+    'EU-SE-1': 'SE',  # Sweden/Norway
+}
+
+STOCK_UNAVAILABLE = 'Unavailable'
+
+
+@lru_cache(maxsize=128)
+def get_lowest_price_by_region(gpu_id: str, gpu_count: int,
+                                country_code: str) -> Dict[str, Any]:
+    """Query RunPod API for lowest price and stock status in a specific region.
+
+    Args:
+        gpu_id: RunPod GPU ID
+        gpu_count: Number of GPUs
+        country_code: ISO country code (e.g., 'US', 'RO')
+
+    Returns:
+        Dict with stockStatus, availableGpuCounts, maxUnreservedGpuCount
+
+    Raises:
+        ValueError: If GPU type not found
+        RuntimeError: If GraphQL query fails
+    """
+    query = f"""
+    query LowestPriceByRegion {{
+      gpuTypes(input: {{id: "{gpu_id}"}}) {{
+        lowestPrice(input: {{
+          gpuCount: {gpu_count},
+          countryCode: "{country_code}"
+        }}) {{
+          stockStatus
+          availableGpuCounts
+          maxUnreservedGpuCount
+        }}
+      }}
+    }}"""
+
+    result = graphql.run_graphql_query(query)
+
+    if 'errors' in result:
+        raise RuntimeError(f"GraphQL query failed: {result['errors']}")
+
+    gpu_types = result.get('data', {}).get('gpuTypes', [])
+    if not gpu_types:
+        raise ValueError(f"No GPU types found for gpu_id={gpu_id}")
+
+    return gpu_types[0].get('lowestPrice', {})
 
 
 def get_gpu_details(gpu_id: str, gpu_count: int = 1) -> Dict[str, Any]:
@@ -529,7 +618,8 @@ def get_cpu_instance_configurations(cpu_id: str) -> List[Dict[str, Any]]:
     return instances
 
 
-def get_gpu_instance_configurations(gpu_id: str) -> List[Dict[str, Any]]:
+def get_gpu_instance_configurations(gpu_id: str,
+                                   filter_available: bool = True) -> List[Dict[str, Any]]:
     """Retrieves available GPU instance configurations for a given GPU ID.
     Only secure cloud instances are included (community cloud instances
     are skipped).  Each configuration includes pricing (spot and base), region,
@@ -537,6 +627,8 @@ def get_gpu_instance_configurations(gpu_id: str) -> List[Dict[str, Any]]:
     If the GPU type is not found a default maximum GPU count & memory is used.
     Args:
         gpu_id (str): The identifier of the GPU type
+        filter_available (bool): If True, only include instances with stock
+            availability in specific regions. Default: True.
     Returns:
         List[Dict]: A list of dictionaries, each representing an instance
             configuration with the following keys:
@@ -586,6 +678,35 @@ def get_gpu_instance_configurations(gpu_id: str) -> List[Dict[str, Any]]:
             base_price = format_price(detailed_gpu['securePrice'] * gpu_count)
 
         for region, zones in REGION_ZONES.items():
+            region_stock_status = None  # Unknown by default
+
+            if filter_available:
+                # Get country code for this region
+                country_code = REGION_COUNTRY_CODES.get(region)
+
+                if country_code:
+                    try:
+                        # Query RunPod API for regional availability
+                        regional_lowest = get_lowest_price_by_region(
+                            gpu_id, gpu_count, country_code)
+                        region_stock_status = (
+                            regional_lowest.get('stockStatus') or
+                            STOCK_UNAVAILABLE)
+                    except (ValueError, RuntimeError, Exception) as e:
+                        # Log warning but continue - fail-open approach
+                        print(f'Warning: Regional availability check failed for '
+                              f'gpu_id={gpu_id} gpu_count={gpu_count} '
+                              f'country_code={country_code}: {e}')
+                        region_stock_status = STOCK_UNAVAILABLE
+                else:
+                    # No country code mapping - assume unavailable
+                    region_stock_status = STOCK_UNAVAILABLE
+
+                # Skip this region if stock is unavailable
+                if region_stock_status in (None, STOCK_UNAVAILABLE):
+                    continue
+
+            # Add instances for all zones in this region
             for zone in zones:
                 instances.append({
                     'InstanceType': f'{gpu_count}x_{base_gpu_name}_SECURE',
@@ -601,12 +722,15 @@ def get_gpu_instance_configurations(gpu_id: str) -> List[Dict[str, Any]]:
     return instances
 
 
-def fetch_runpod_catalog(no_gpu: bool, no_cpu: bool) -> pd.DataFrame:
+def fetch_runpod_catalog(no_gpu: bool, no_cpu: bool,
+                        filter_available: bool = True) -> pd.DataFrame:
     """Fetch and process RunPod GPU catalog data.
 
     Args:
-        gpu_ids: Optional comma-separated list of RunPod GPU IDs to fetch.
-                If None, fetch all available GPUs.
+        no_gpu: If True, skip GPU instances
+        no_cpu: If True, skip CPU instances
+        filter_available: If True, only include GPUs with stock availability.
+            Default: True.
     """
     try:
         # Initialize RunPod client
@@ -624,7 +748,8 @@ def fetch_runpod_catalog(no_gpu: bool, no_cpu: bool) -> pd.DataFrame:
             # Generate instances from GPU ids
             instances.extend([
                 instance for gpu in gpus
-                for instance in get_gpu_instance_configurations(gpu['id'])
+                for instance in get_gpu_instance_configurations(
+                    gpu['id'], filter_available=filter_available)
             ])
 
         if not no_cpu:
@@ -679,12 +804,21 @@ def main():
         help='Do not fetch and store catalog for RunPod CPUs (serverless)',
         default=False,
         action='store_true')
+    parser.add_argument(
+        '--no-filter-available',
+        action='store_true',
+        help='Include all GPUs regardless of stock availability. '
+             'By default, only GPUs with confirmed regional stock are included. '
+             'Use this flag for debugging or to see the full catalog.',
+    )
     args = parser.parse_args()
 
     try:
         os.makedirs(args.output_dir, exist_ok=True)
 
-        catalog = fetch_runpod_catalog(args.no_gpu, args.no_cpu)
+        filter_available = not args.no_filter_available
+        catalog = fetch_runpod_catalog(args.no_gpu, args.no_cpu,
+                                       filter_available=filter_available)
 
         output_file_location = os.path.join(args.output_dir, 'vms.csv')
         save_catalog(catalog, output_file_location)
