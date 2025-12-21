@@ -288,32 +288,16 @@ REGION_ZONES = {
 }
 
 # Region to country code mapping for availability checks
-# Maps RunPod region keys to ISO country codes for regional stock queries
+# Maps REGION_ZONES keys to ISO country codes for regional stock queries
 REGION_COUNTRY_CODES = {
-    'EU-RO-1': 'RO',  # Romania
-    'EUR-IS-1': 'IS',  # Iceland
-    'EUR-IS-2': 'IS',  # Iceland
-    'EUR-IS-3': 'IS',  # Iceland
-    'CA-MTL-1': 'CA',  # Canada - Montreal
-    'CA-MTL-2': 'CA',  # Canada - Montreal
-    'CA-MTL-3': 'CA',  # Canada - Montreal
-    'US-CA-1': 'US',  # USA - California
-    'US-CA-2': 'US',  # USA - California
-    'US-DE-1': 'US',  # USA - Delaware
-    'US-GA-1': 'US',  # USA - Georgia
-    'US-GA-2': 'US',  # USA - Georgia
-    'US-IL-1': 'US',  # USA - Illinois
-    'US-KS-1': 'US',  # USA - Kansas
-    'US-KS-2': 'US',  # USA - Kansas
-    'US-NC-1': 'US',  # USA - North Carolina
-    'US-TX-1': 'US',  # USA - Texas
-    'US-TX-2': 'US',  # USA - Texas
-    'US-TX-3': 'US',  # USA - Texas
-    'US-TX-4': 'US',  # USA - Texas
-    'US-WA-1': 'US',  # USA - Washington
-    'EU-CZ-1': 'CZ',  # Czech Republic
-    'EU-NL-1': 'NL',  # Netherlands
-    'EU-SE-1': 'SE',  # Sweden/Norway
+    'CA': 'CA',  # Canada
+    'CZ': 'CZ',  # Czech Republic
+    'IS': 'IS',  # Iceland
+    'NL': 'NL',  # Netherlands
+    'NO': 'NO',  # Norway
+    'RO': 'RO',  # Romania
+    'SE': 'SE',  # Sweden
+    'US': 'US',  # United States
 }
 
 STOCK_UNAVAILABLE = 'Unavailable'
