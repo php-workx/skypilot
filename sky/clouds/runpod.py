@@ -85,9 +85,39 @@ class RunPod(clouds.Cloud):
         zone: Optional[str],
         resources: Optional['resources_lib.Resources'] = None,
     ) -> List[clouds.Region]:
-        del accelerators  # unused
-        regions = catalog.get_region_zones_for_instance_type(
-            instance_type, use_spot, 'runpod')
+        del resources  # unused
+        if accelerators is None:
+            regions = catalog.get_region_zones_for_instance_type(
+                instance_type, use_spot, 'runpod')
+        else:
+            assert len(accelerators) == 1, accelerators
+            acc = list(accelerators.keys())[0]
+            acc_count = list(accelerators.values())[0]
+            acc_regions = catalog.get_region_zones_for_accelerators(
+                acc, acc_count, use_spot, clouds='runpod')
+            if instance_type is None:
+                regions = acc_regions
+            else:
+                vm_regions = catalog.get_region_zones_for_instance_type(
+                    instance_type, use_spot, 'runpod')
+                # Find the intersection between acc_regions and vm_regions
+                regions = []
+                for r1 in acc_regions:
+                    for r2 in vm_regions:
+                        if r1.name != r2.name:
+                            continue
+                        assert r1.zones is not None, r1
+                        assert r2.zones is not None, r2
+                        zones = []
+                        for z1 in r1.zones:
+                            for z2 in r2.zones:
+                                if z1.name == z2.name:
+                                    zones.append(z1)
+                                    break
+                        if zones:
+                            r1_copy = clouds.Region(r1.name)
+                            r1_copy.set_zones(zones)
+                            regions.append(r1_copy)
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
