@@ -1181,6 +1181,304 @@ available_node_types:
               add:
                 - IPC_LOCK
           {% endif %}
+
+        {% if 'sky-serve-controller' in cluster_name_on_cloud %}
+        - name: skypilot-log-shipper
+          imagePullPolicy: IfNotPresent
+          image: timberio/vector:0.46.1-alpine
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          command: ["/bin/sh", "-lc"]
+          args:
+            - |
+              set -eu
+
+              cluster_name="{{ cluster_name_on_cloud }}"
+              service="${SKYPILOT_SERVICE:-}"
+              if [ -z "$service" ]; then
+                case "$cluster_name" in
+                  sky-serve-controller-*) service="${cluster_name#sky-serve-controller-}" ;;
+                  *) service="$cluster_name" ;;
+                esac
+              fi
+              export SKYPILOT_SERVICE="$service"
+
+              # Best-effort load defaults from ~/.sky/config.yaml (if present).
+              # Users can override via env vars:
+              # - SKYPILOT_CW_LOG_GROUP_BASE: CloudWatch log group prefix (per-service groups are created under this)
+              # - SKYPILOT_CW_STREAM_PREFIX: CloudWatch stream prefix (stream names are stable per component)
+              base="/home/sky"
+              if [ ! -d "$base" ]; then
+                echo "ERROR: expected SkyPilot logs under /home/sky but directory is missing; cannot ship logs to CloudWatch." >&2
+                sleep infinity
+              fi
+              cfg="$base/.sky/config.yaml"
+
+              log_group=""
+              stream_prefix=""
+              region=""
+              if [ -f "$cfg" ]; then
+                extract_cfg_value() {
+                  want="$1"
+                  awk -v want="$want" '
+                    function strip(s) {
+                      gsub(/^[ \t"]+/, "", s);
+                      gsub(/[ \t"\r]+$/, "", s);
+                      return s;
+                    }
+                    function indent(s) {
+                      match(s, /^[ ]*/);
+                      return RLENGTH;
+                    }
+                    BEGIN {
+                      in_logs = 0;
+                      logs_indent = -1;
+                      in_aws = 0;
+                      aws_indent = -1;
+                      val = "";
+                    }
+                    {
+                      line = $0;
+                      trimmed = line;
+                      sub(/^[ ]*/, "", trimmed);
+                      if (trimmed == "" || trimmed ~ /^#/) {
+                        next;
+                      }
+
+                      ind = indent(line);
+                      if (trimmed ~ /^logs:[ \t]*$/) {
+                        in_logs = 1;
+                        logs_indent = ind;
+                        in_aws = 0;
+                        next;
+                      }
+                      if (in_logs && ind <= logs_indent) {
+                        in_logs = 0;
+                        in_aws = 0;
+                      }
+
+                      if (in_logs && trimmed ~ /^aws:[ \t]*$/) {
+                        in_aws = 1;
+                        aws_indent = ind;
+                        next;
+                      }
+                      if (in_aws && ind <= aws_indent) {
+                        in_aws = 0;
+                      }
+
+                      if (in_aws && trimmed ~ ("^" want ":[ \t]*")) {
+                        sub(("^" want ":[ \t]*"), "", trimmed);
+                        val = strip(trimmed);
+                      }
+                    }
+                    END {
+                      print val;
+                    }' "$cfg"
+                }
+
+                log_group="$(extract_cfg_value log_group_name)"
+                stream_prefix="$(extract_cfg_value log_stream_prefix)"
+                region="$(extract_cfg_value region)"
+              fi
+
+              # Base log group prefix; actual group becomes "${SKYPILOT_CW_LOG_GROUP_BASE}/<skyserve_service>".
+              if [ -z "${SKYPILOT_CW_LOG_GROUP_BASE:-}" ] && [ -n "$log_group" ]; then
+                export SKYPILOT_CW_LOG_GROUP_BASE="$log_group"
+              else
+                export SKYPILOT_CW_LOG_GROUP_BASE="${SKYPILOT_CW_LOG_GROUP_BASE:-/skypilot/serve}"
+              fi
+
+              # Optional stream prefix; actual stream becomes "${SKYPILOT_CW_STREAM_PREFIX}<component>".
+              if [ -z "${SKYPILOT_CW_STREAM_PREFIX:-}" ]; then
+                if [ -z "$stream_prefix" ]; then
+                  stream_prefix="skypilot-serve-"
+                fi
+                export SKYPILOT_CW_STREAM_PREFIX="$stream_prefix"
+              fi
+
+              if [ -z "${AWS_REGION:-}" ] && [ -n "${AWS_DEFAULT_REGION:-}" ]; then
+                export AWS_REGION="$AWS_DEFAULT_REGION"
+              elif [ -z "${AWS_DEFAULT_REGION:-}" ] && [ -n "${AWS_REGION:-}" ]; then
+                export AWS_DEFAULT_REGION="$AWS_REGION"
+              fi
+              if [ -z "${AWS_REGION:-}" ] && [ -n "$region" ]; then
+                export AWS_REGION="$region"
+                export AWS_DEFAULT_REGION="$region"
+              fi
+              if [ -z "${AWS_REGION:-}" ]; then
+                echo "ERROR: AWS_REGION/AWS_DEFAULT_REGION not set and no region found in $cfg; cannot ship logs to CloudWatch." >&2
+                sleep infinity
+              fi
+
+              mkdir -p "$base/.vector" "$base/.sky"
+              export VECTOR_DATA_DIR="${VECTOR_DATA_DIR:-$base/.vector}"
+
+              cat >/tmp/vector.yaml <<'YAML'
+              data_dir: ${VECTOR_DATA_DIR}
+
+              sources:
+                skypilot_logs:
+                  type: file
+                  include:
+                    - /home/sky/.sky/serve/*/*.log
+                    - /home/sky/sky_logs/*/*.log
+                    - /home/sky/sky_logs/*/*/*.log
+                    - /home/sky/sky_logs/*/*/*/*.log
+                    - /home/sky/.sky/*.log
+                  read_from: beginning
+
+              transforms:
+                enrich:
+                  type: remap
+                  inputs:
+                    - skypilot_logs
+                  source: |
+                    .controller = get_env_var("SKYPILOT_SERVICE") ?? "unknown"
+                    .component = "unknown"
+                    .source_path = string!(.file)
+                    .skyserve_service = null
+                    .skyserve_service_dir = null
+
+                    if is_string(.source_path) {
+                      svc = parse_regex(.source_path, r'/(?:home/sky|root)/\.sky/serve/(?P<svc_dir>[^/]+)/') ?? null
+                      if svc != null {
+                        .skyserve_service_dir = svc.svc_dir
+                        .skyserve_service = svc.svc_dir
+                      } else {
+                        svc2 = parse_regex(.source_path, r'/replica_jobs/(?P<cluster_id>[^/]+)/(?P<replica_id>[^-]+)-(?P<svc>[^/]+)/') ?? null
+                        if svc2 != null {
+                          svc_name = svc2.svc
+                          if svc_name != null {
+                            .skyserve_service = svc_name
+                            .skyserve_service_dir = replace!(svc_name, "-", "_")
+                          }
+                        }
+                      }
+
+                      if ends_with(.source_path, "/controller.log") {
+                        .component = "controller"
+                      } else if ends_with(.source_path, "/load_balancer.log") {
+                        .component = "load_balancer"
+                      } else if ends_with(.source_path, "/provision.log") {
+                        .component = "provision"
+                      } else if contains(.source_path, "/sky_logs/jobs_controller/") {
+                        .component = "jobs"
+                      } else {
+                        launch = parse_regex(.source_path, r'/replica_(?P<replica_id>[^_/]+)_launch\.log$') ?? null
+                        if launch != null {
+                          .component = "replica_launch"
+                          .replica_id = launch.replica_id
+                        }
+
+                        run = parse_regex(.source_path, r'/replica_jobs/(?P<cluster_id>[^/]+)/(?P<replica_id>[^-]+)-(?P<svc>[^/]+)/run\.log$') ?? null
+                        if run != null {
+                          .component = "replica_run"
+                          .replica_id = run.replica_id
+                          .replica_cluster_id = run.cluster_id
+                        }
+                      }
+                    }
+
+                    # CloudWatch routing:
+                    # - Per-service groups: "${SKYPILOT_CW_LOG_GROUP_BASE}/<skyserve_service>".
+                    # - Stable streams per component, with optional prefix: "${SKYPILOT_CW_STREAM_PREFIX}<stream>".
+                    group_base = get_env_var("SKYPILOT_CW_LOG_GROUP_BASE") ?? "/skypilot/serve"
+                    stream_prefix = get_env_var("SKYPILOT_CW_STREAM_PREFIX") ?? ""
+                    svc_group = .skyserve_service_dir
+                    if svc_group == null {
+                      svc_group = "_controller"
+                    }
+                    .cw_group = group_base + "/" + svc_group
+
+                    stream_base = "misc"
+                    if .component == "controller" {
+                      stream_base = "controller"
+                    } else if .component == "load_balancer" {
+                      stream_base = "load_balancer"
+                    } else if .component == "provision" {
+                      stream_base = "provision"
+                    } else if .component == "jobs" {
+                      stream_base = "jobs"
+                    } else if .component == "replica_launch" || .component == "replica_run" {
+                      stream_base = "replicas"
+                    }
+                    .cw_stream = stream_prefix + stream_base
+
+                    # Backward-compat for queries.
+                    if .skyserve_service == null {
+                      .service = .controller
+                    } else {
+                      .service = .skyserve_service
+                    }
+
+              sinks:
+                cloudwatch:
+                  type: aws_cloudwatch_logs
+                  inputs:
+                    - enrich
+                  region: ${AWS_REGION}
+                  group_name: "{% raw %}{{ cw_group }}{% endraw %}"
+                  stream_name: "{% raw %}{{ cw_stream }}{% endraw %}"
+                  encoding:
+                    codec: json
+              YAML
+
+              # Acquire a shared-PVC lock so only one overlapping pod ships to the
+              # (stable) CloudWatch log stream at a time.
+              lock_dir="$base/.sky/.logship.lock"
+              stale_secs="${SKYPILOT_LOGSHIP_LOCK_STALE_SECS:-300}"
+              heartbeat_secs="${SKYPILOT_LOGSHIP_LOCK_HEARTBEAT_SECS:-30}"
+
+              echo "Log shipper starting: controller=$SKYPILOT_SERVICE group_base=$SKYPILOT_CW_LOG_GROUP_BASE stream_prefix=$SKYPILOT_CW_STREAM_PREFIX base=$base"
+              while true; do
+                if mkdir "$lock_dir" 2>/dev/null; then
+                  echo "$HOSTNAME" >"$lock_dir/owner" 2>/dev/null || true
+                  date +%s >"$lock_dir/ts" 2>/dev/null || true
+                  break
+                fi
+
+                now="$(date +%s)"
+                ts="$(cat "$lock_dir/ts" 2>/dev/null || echo 0)"
+                if [ "$ts" -gt 0 ] && [ $((now - ts)) -gt "$stale_secs" ]; then
+                  echo "Lock appears stale (age=$((now - ts))s > ${stale_secs}s); attempting to steal: $lock_dir" >&2
+                  rm -rf "$lock_dir" 2>/dev/null || true
+                  continue
+                fi
+                sleep 5
+              done
+
+              cleanup() {
+                rm -rf "$lock_dir" 2>/dev/null || true
+              }
+              trap cleanup EXIT INT TERM
+
+              (
+                parent_pid="$PPID"
+                while true; do
+                  kill -0 "$parent_pid" 2>/dev/null || exit 0
+                  date +%s >"$lock_dir/ts" 2>/dev/null || true
+                  sleep "$heartbeat_secs"
+                done
+              ) &
+
+              exec vector --config /tmp/vector.yaml
+
+          volumeMounts:
+          {% if high_availability %}
+          - name: {{k8s_high_availability_deployment_volume_mount_name}}
+            mountPath: {{k8s_high_availability_deployment_volume_mount_path}}
+          {% endif %}
+          {% for volume_mount in volume_mounts %}
+          - name: {{volume_mount.name}}
+            mountPath: {{volume_mount.path}}
+          {% endfor %}
+        {% endif %}
+
         {% if k8s_enable_gpudirect_tcpx %}
         # GPUDirect TCPX daemon sidecar container
         - name: tcpx-daemon

@@ -2,7 +2,7 @@
 
 **Purpose:** Track all intentional modifications to the SkyPilot codebase for easier upgrades.
 
-**Last Updated:** 2025-12-20
+**Last Updated:** 2025-12-24
 **Base Version:** v0.10.5
 **Next Upgrade Target:** v0.11.1 (208 commits)
 
@@ -140,6 +140,38 @@ if not credentials_available:
 - Check `apply_to: controller_only` config still works
 
 **Test:** Run without AWS credentials, should warn but not error
+
+---
+
+### Kubernetes SkyServe Vector Log Shipping 🟡 MERGE CAREFULLY
+
+**Description:** Add a Vector sidecar to SkyServe controller pods to ship SkyServe/service/replica logs to CloudWatch with per-service log groups and stable stream names per component.
+
+**Commits:**
+- (uncommitted) - feat(k8s/serve/logs): per-SkyServe-service CloudWatch groups + stable stream names via Vector sidecar
+
+**Files:**
+- `sky/templates/kubernetes-ray.yml.j2` 🟡 (modified)
+  - Add `skypilot-log-shipper` container for `sky-serve-controller-*` clusters
+  - Generate `/tmp/vector.yaml` at runtime and tail `/home/sky` SkyPilot logs
+  - Compute `cw_group` / `cw_stream` per event and route CloudWatch sink via templates
+  - Ensure only one overlapping controller pod ships to stable streams via a shared PVC lock (`$base/.sky/.logship.lock`)
+
+**Environment Variables:**
+- `SKYPILOT_CW_LOG_GROUP_BASE` - CloudWatch log group prefix (default: `logs.aws.log_group_name` from `~/.sky/config.yaml`, else `/skypilot/serve`)
+- `SKYPILOT_CW_STREAM_PREFIX` - CloudWatch stream prefix (default: `logs.aws.log_stream_prefix` from `~/.sky/config.yaml`, else `skypilot-serve-`)
+- `AWS_REGION` / `AWS_DEFAULT_REGION` - required (best-effort default from `logs.aws.region` in `~/.sky/config.yaml`)
+
+**CloudWatch Layout:**
+- Per-service groups: `${SKYPILOT_CW_LOG_GROUP_BASE}/<skyserve_service_dir>`
+  - Streams: `${SKYPILOT_CW_STREAM_PREFIX}controller`, `${SKYPILOT_CW_STREAM_PREFIX}load_balancer`, `${SKYPILOT_CW_STREAM_PREFIX}replicas` (combined)
+- Controller-only group: `${SKYPILOT_CW_LOG_GROUP_BASE}/_controller`
+  - Streams: `${SKYPILOT_CW_STREAM_PREFIX}provision`, `${SKYPILOT_CW_STREAM_PREFIX}jobs`
+
+**Merge Strategy:**
+- Expect conflicts on upgrades (template file): re-apply the sidecar block and keep the Jinja `{% raw %}` wrappers around Vector template strings.
+
+**Test:** Deploy a `sky serve` service on Kubernetes and confirm CloudWatch groups/streams match the layout above.
 
 ---
 
