@@ -1186,6 +1186,13 @@ available_node_types:
         - name: skypilot-log-shipper
           imagePullPolicy: IfNotPresent
           image: timberio/vector:0.46.1-alpine
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
           command: ["/bin/sh", "-lc"]
           args:
             - |
@@ -1216,9 +1223,67 @@ available_node_types:
               stream_prefix=""
               region=""
               if [ -f "$cfg" ]; then
-                log_group="$(sed -n -E 's/^\\s*log_group_name:\\s*//p' "$cfg" | tail -n 1 | tr -d '\"\\r')"
-                stream_prefix="$(sed -n -E 's/^\\s*log_stream_prefix:\\s*//p' "$cfg" | tail -n 1 | tr -d '\"\\r')"
-                region="$(sed -n -E 's/^\\s*region:\\s*//p' "$cfg" | tail -n 1 | tr -d '\"\\r')"
+                extract_cfg_value() {
+                  want="$1"
+                  awk -v want="$want" '
+                    function strip(s) {
+                      gsub(/^[ \t"]+/, "", s);
+                      gsub(/[ \t"\r]+$/, "", s);
+                      return s;
+                    }
+                    function indent(s) {
+                      match(s, /^[ ]*/);
+                      return RLENGTH;
+                    }
+                    BEGIN {
+                      in_logs = 0;
+                      logs_indent = -1;
+                      in_aws = 0;
+                      aws_indent = -1;
+                      val = "";
+                    }
+                    {
+                      line = $0;
+                      trimmed = line;
+                      sub(/^[ ]*/, "", trimmed);
+                      if (trimmed == "" || trimmed ~ /^#/) {
+                        next;
+                      }
+
+                      ind = indent(line);
+                      if (trimmed ~ /^logs:[ \t]*$/) {
+                        in_logs = 1;
+                        logs_indent = ind;
+                        in_aws = 0;
+                        next;
+                      }
+                      if (in_logs && ind <= logs_indent) {
+                        in_logs = 0;
+                        in_aws = 0;
+                      }
+
+                      if (in_logs && trimmed ~ /^aws:[ \t]*$/) {
+                        in_aws = 1;
+                        aws_indent = ind;
+                        next;
+                      }
+                      if (in_aws && ind <= aws_indent) {
+                        in_aws = 0;
+                      }
+
+                      if (in_aws && trimmed ~ ("^" want ":[ \t]*")) {
+                        sub(("^" want ":[ \t]*"), "", trimmed);
+                        val = strip(trimmed);
+                      }
+                    }
+                    END {
+                      print val;
+                    }' "$cfg"
+                }
+
+                log_group="$(extract_cfg_value log_group_name)"
+                stream_prefix="$(extract_cfg_value log_stream_prefix)"
+                region="$(extract_cfg_value region)"
               fi
 
               # Base log group prefix; actual group becomes "${SKYPILOT_CW_LOG_GROUP_BASE}/<skyserve_service>".
@@ -1393,7 +1458,9 @@ available_node_types:
               trap cleanup EXIT INT TERM
 
               (
+                parent_pid="$PPID"
                 while true; do
+                  kill -0 "$parent_pid" 2>/dev/null || exit 0
                   date +%s >"$lock_dir/ts" 2>/dev/null || true
                   sleep "$heartbeat_secs"
                 done

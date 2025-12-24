@@ -21,6 +21,7 @@ import re
 import runpy
 import subprocess
 import sys
+from typing import Any, cast, Dict
 
 import setuptools
 
@@ -185,10 +186,13 @@ if __name__ == '__main__':
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Topic :: System :: Distributed Computing',
         ],
-        project_urls={
-            'Homepage': 'https://github.com/skypilot-org/skypilot',
-            'Issues': 'https://github.com/skypilot-org/skypilot/issues',
-            'Discussion': 'https://github.com/skypilot-org/skypilot/discussions',
-            'Documentation': 'https://docs.skypilot.co/',
-        },
+        # NOTE: mypy expects a very permissive dict-like type here; use a cast
+        # to avoid false positives from dict[str, str] invariance.
+        project_urls=cast(
+            Dict[Any, Any], {
+                'Homepage': 'https://github.com/skypilot-org/skypilot',
+                'Issues': 'https://github.com/skypilot-org/skypilot/issues',
+                'Discussion': 'https://github.com/skypilot-org/skypilot/discussions',
+                'Documentation': 'https://docs.skypilot.co/',
+            }),
     )
