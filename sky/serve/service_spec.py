@@ -1,4 +1,5 @@
 """Service specification for SkyServe."""
+import dataclasses
 import json
 import os
 import textwrap
@@ -14,6 +15,33 @@ from sky.utils import schemas
 from sky.utils import ux_utils
 from sky.utils import yaml_utils
 
+_CUSTOM_METRIC_KINDS = {'gauge', 'rate'}
+_CUSTOM_METRIC_GAUGE_AGGREGATIONS = {'avg', 'max', 'last'}
+
+
+@dataclasses.dataclass(frozen=True)
+class AutoscalingMetricSpec:
+    """Custom autoscaling metric configuration."""
+    name: str
+    target_per_replica: float
+    kind: str = constants.AUTOSCALER_CUSTOM_METRIC_DEFAULT_KIND
+    aggregation: str = constants.AUTOSCALER_CUSTOM_METRIC_DEFAULT_AGGREGATION
+    window_seconds: int = constants.AUTOSCALER_CUSTOM_METRIC_WINDOW_SECONDS
+    stale_after_seconds: Optional[
+        int] = constants.AUTOSCALER_CUSTOM_METRIC_STALE_AFTER_SECONDS
+
+    def to_dict(self) -> Dict[str, Any]:
+        config = {
+            'name': self.name,
+            'target_per_replica': self.target_per_replica,
+            'kind': self.kind,
+            'aggregation': self.aggregation,
+            'window_seconds': self.window_seconds,
+        }
+        if self.stale_after_seconds is not None:
+            config['stale_after_seconds'] = self.stale_after_seconds
+        return config
+
 
 class SkyServiceSpec:
     """SkyServe service specification."""
@@ -28,6 +56,7 @@ class SkyServiceSpec:
         num_overprovision: Optional[int] = None,
         ports: Optional[str] = None,
         target_qps_per_replica: Optional[Union[float, Dict[str, float]]] = None,
+        autoscaling_metric: Optional[AutoscalingMetricSpec] = None,
         post_data: Optional[Dict[str, Any]] = None,
         tls_credential: Optional[serve_utils.TLSCredential] = None,
         readiness_headers: Optional[Dict[str, str]] = None,
@@ -44,6 +73,7 @@ class SkyServiceSpec:
                     'max_replicas',
                     'num_overprovision',
                     'target_qps_per_replica',
+                    'autoscaling_metric',
                     'upscale_delay_seconds',
                     'downscale_delay_seconds',
                     'base_ondemand_fallback_replicas',
@@ -71,18 +101,61 @@ class SkyServiceSpec:
                                  f'min_replicas={min_replicas}, '
                                  f'max_replicas={max_replicas}')
 
-        if target_qps_per_replica is not None:
+        if (autoscaling_metric is not None and
+                target_qps_per_replica is not None):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify both autoscaling_metric and '
+                    'target_qps_per_replica. Please use one autoscaling '
+                    'strategy.')
+
+        autoscaling_enabled = (target_qps_per_replica is not None or
+                               autoscaling_metric is not None)
+        if autoscaling_enabled:
             if max_replicas is None:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError('max_replicas must be set where '
-                                     'target_qps_per_replica is set.')
+                    raise ValueError(
+                        'max_replicas must be set when autoscaling is enabled.')
         else:
             if max_replicas is not None and max_replicas != min_replicas:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Detected different min_replicas and max_replicas '
-                        'while target_qps_per_replica is not set. To enable '
-                        'autoscaling, please set target_qps_per_replica.')
+                        'while autoscaling is not set. To enable autoscaling, '
+                        'please set target_qps_per_replica or '
+                        'autoscaling_metric.')
+
+        if autoscaling_metric is not None:
+            if autoscaling_metric.kind not in _CUSTOM_METRIC_KINDS:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('autoscaling_metric.kind must be one of '
+                                     f'{sorted(_CUSTOM_METRIC_KINDS)}. Got: '
+                                     f'{autoscaling_metric.kind}')
+            if autoscaling_metric.kind == 'gauge':
+                if (autoscaling_metric.aggregation
+                        not in _CUSTOM_METRIC_GAUGE_AGGREGATIONS):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'autoscaling_metric.aggregation must be one of '
+                            f'{sorted(_CUSTOM_METRIC_GAUGE_AGGREGATIONS)}. '
+                            f'Got: {autoscaling_metric.aggregation}')
+            if autoscaling_metric.target_per_replica <= 0:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'autoscaling_metric.target_per_replica must be > 0. '
+                        f'Got: {autoscaling_metric.target_per_replica}')
+            if autoscaling_metric.window_seconds <= 0:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'autoscaling_metric.window_seconds must be > 0. '
+                        f'Got: {autoscaling_metric.window_seconds}')
+            if (autoscaling_metric.stale_after_seconds is not None and
+                    autoscaling_metric.stale_after_seconds <= 0):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'autoscaling_metric.stale_after_seconds must be > 0 '
+                        'when set. Got: '
+                        f'{autoscaling_metric.stale_after_seconds}')
 
         if not readiness_path.startswith('/'):
             with ux_utils.print_exception_no_traceback():
@@ -105,6 +178,8 @@ class SkyServiceSpec:
         self._ports: Optional[str] = ports
         self._target_qps_per_replica: Optional[Union[float, Dict[
             str, float]]] = target_qps_per_replica
+        self._autoscaling_metric: Optional[
+            AutoscalingMetricSpec] = autoscaling_metric
         self._post_data: Optional[Dict[str, Any]] = post_data
         self._tls_credential: Optional[serve_utils.TLSCredential] = (
             tls_credential)
@@ -211,6 +286,7 @@ class SkyServiceSpec:
             service_config['max_replicas'] = None
             service_config['num_overprovision'] = None
             service_config['target_qps_per_replica'] = None
+            service_config['autoscaling_metric'] = None
             service_config['upscale_delay_seconds'] = None
             service_config['downscale_delay_seconds'] = None
         else:
@@ -221,6 +297,8 @@ class SkyServiceSpec:
                 'num_overprovision', None)
             service_config['target_qps_per_replica'] = policy_section.get(
                 'target_qps_per_replica', None)
+            service_config['autoscaling_metric'] = policy_section.get(
+                'autoscaling_metric', None)
             service_config['upscale_delay_seconds'] = policy_section.get(
                 'upscale_delay_seconds', None)
             service_config['downscale_delay_seconds'] = policy_section.get(
@@ -255,6 +333,42 @@ class SkyServiceSpec:
                         'When using "instance_aware_least_load" policy, '
                         'target_qps_per_replica must be a '
                         'dict mapping GPU types to QPS values.')
+
+        autoscaling_metric_config = service_config['autoscaling_metric']
+        if autoscaling_metric_config is not None:
+            if not isinstance(autoscaling_metric_config, dict):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'autoscaling_metric must be a mapping in the service '
+                        'YAML.')
+            kind = autoscaling_metric_config.get(
+                'kind', constants.AUTOSCALER_CUSTOM_METRIC_DEFAULT_KIND)
+            if isinstance(kind, str):
+                kind = kind.lower()
+            aggregation = autoscaling_metric_config.get(
+                'aggregation',
+                constants.AUTOSCALER_CUSTOM_METRIC_DEFAULT_AGGREGATION)
+            if isinstance(aggregation, str):
+                aggregation = aggregation.lower()
+            window_seconds = autoscaling_metric_config.get(
+                'window_seconds',
+                constants.AUTOSCALER_CUSTOM_METRIC_WINDOW_SECONDS)
+            if 'stale_after_seconds' in autoscaling_metric_config:
+                stale_after_seconds = autoscaling_metric_config.get(
+                    'stale_after_seconds')
+            else:
+                stale_after_seconds = (
+                    constants.AUTOSCALER_CUSTOM_METRIC_STALE_AFTER_SECONDS)
+            autoscaling_metric_config = AutoscalingMetricSpec(
+                name=autoscaling_metric_config['name'],
+                target_per_replica=autoscaling_metric_config[
+                    'target_per_replica'],
+                kind=kind,
+                aggregation=aggregation,
+                window_seconds=window_seconds,
+                stale_after_seconds=stale_after_seconds,
+            )
+            service_config['autoscaling_metric'] = autoscaling_metric_config
 
         tls_section = config.get('tls', None)
         if tls_section is not None:
@@ -327,6 +441,9 @@ class SkyServiceSpec:
                         self.num_overprovision)
         add_if_not_none('replica_policy', 'target_qps_per_replica',
                         self.target_qps_per_replica)
+        if self.autoscaling_metric is not None:
+            add_if_not_none('replica_policy', 'autoscaling_metric',
+                            self.autoscaling_metric.to_dict())
         add_if_not_none('replica_policy', 'dynamic_ondemand_fallback',
                         self.dynamic_ondemand_fallback)
         add_if_not_none('replica_policy', 'base_ondemand_fallback_replicas',
@@ -389,14 +506,20 @@ class SkyServiceSpec:
         min_plural = '' if self.min_replicas == 1 else 's'
         if self.max_replicas == self.min_replicas or self.max_replicas is None:
             return f'Fixed {self.min_replicas} {noun}{min_plural}'
-        # Already checked in __init__.
-        assert self.target_qps_per_replica is not None
         # TODO(tian): Refactor to contain more information
         max_plural = '' if self.max_replicas == 1 else 's'
         overprovision_str = ''
         if self.num_overprovision is not None:
             overprovision_str = (
                 f' with {self.num_overprovision} overprovisioned replicas')
+        if self.autoscaling_metric is not None:
+            metric = self.autoscaling_metric
+            return (f'Autoscaling from {self.min_replicas} to '
+                    f'{self.max_replicas} {noun}{max_plural}'
+                    f'{overprovision_str} (target {metric.name} per '
+                    f'{noun}: {metric.target_per_replica})')
+        # Already checked in __init__.
+        assert self.target_qps_per_replica is not None
         return (f'Autoscaling from {self.min_replicas} to {self.max_replicas} '
                 f'{noun}{max_plural}{overprovision_str} (target QPS per '
                 f'{noun}: {self.target_qps_per_replica})')
@@ -458,6 +581,10 @@ class SkyServiceSpec:
     def target_qps_per_replica(
             self) -> Optional[Union[float, Dict[str, float]]]:
         return self._target_qps_per_replica
+
+    @property
+    def autoscaling_metric(self) -> Optional[AutoscalingMetricSpec]:
+        return self._autoscaling_metric
 
     @property
     def post_data(self) -> Optional[Dict[str, Any]]:
@@ -526,6 +653,8 @@ class SkyServiceSpec:
             ports=override.pop('ports', self._ports),
             target_qps_per_replica=override.pop('target_qps_per_replica',
                                                 self._target_qps_per_replica),
+            autoscaling_metric=override.pop('autoscaling_metric',
+                                            self._autoscaling_metric),
             post_data=override.pop('post_data', self._post_data),
             tls_credential=override.pop('tls_credential', self._tls_credential),
             readiness_headers=override.pop('readiness_headers',

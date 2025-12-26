@@ -99,6 +99,30 @@ change the scaling delay by specifying the :code:`upscale_delay_seconds` and
 
 If you want more aggressive scaling, set those values to a lower number and vice versa.
 
+Custom metrics
+--------------
+
+SkyServe can also autoscale using externally pushed metrics (e.g., concurrent
+users). Configure a custom metric in the service YAML:
+
+.. code-block:: yaml
+    :emphasize-lines: 4-10
+
+    service:
+      readiness_probe: /
+      replica_policy:
+        min_replicas: 2
+        max_replicas: 10
+        autoscaling_metric:
+          name: concurrent_users
+          target_per_replica: 5
+          kind: gauge            # gauge | rate
+          aggregation: max       # max | avg | last
+          window_seconds: 60
+          stale_after_seconds: 180
+
+``autoscaling_metric`` is mutually exclusive with ``target_qps_per_replica``.
+
 Scale-to-zero
 -------------
 

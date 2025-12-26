@@ -876,7 +876,7 @@ Example:
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 The recovery strategy for managed jobs (optional).
 
-In effect for managed jobs. Possible values are ``FAILOVER`` and ``EAGER_NEXT_REGION``.
+We can specify the strategy for which region to recover the job to when it fails. Possible values are ``FAILOVER`` and ``EAGER_NEXT_REGION``.
 
 If ``FAILOVER`` is specified, the job will be restarted in the same region if the node fails, and go to the next region if no available resources are found in the same region.
 
@@ -899,7 +899,40 @@ OR
   resources:
     job_recovery:
       strategy: EAGER_NEXT_REGION
+
+We can also specify the maximum number of times to restart the job on user code errors (non-zero exit codes).
+
+.. code-block:: yaml
+
+  resources:
+    job_recovery:
       max_restarts_on_errors: 3
+
+We can also specify the exit codes that should always trigger recovery, regardless of the :code:`max_restarts_on_errors` limit. This is useful when certain exit codes indicate transient errors that should always be retried (e.g., NCCL timeouts, specific GPU driver issues).
+
+We can specify multiple exit codes:
+
+.. code-block:: yaml
+
+  resources:
+    job_recovery:
+      # Always recover on these exit codes
+      recover_on_exit_codes: [33, 34]
+
+Or a single exit code:
+
+.. code-block:: yaml
+
+  resources:
+    job_recovery:
+      # Always recover on these exit codes
+      recover_on_exit_codes: 33
+
+Available fields:
+
+- :code:`strategy`: The recovery strategy to use (:code:`FAILOVER` or :code:`EAGER_NEXT_REGION`)
+- :code:`max_restarts_on_errors`: Maximum number of times to restart the job on user code errors (non-zero exit codes)
+- :code:`recover_on_exit_codes`: Exit code(s) (0-255) that should always trigger recovery. Can be a single integer (e.g., :code:`33`) or a list (e.g., :code:`[33, 34]`). Restarts triggered by these exit codes do not count towards the :code:`max_restarts_on_errors` limit. Useful for specific transient errors like NCCL timeouts.
 
 
 .. _yaml-spec-envs:
@@ -1324,13 +1357,47 @@ Target queries per second per replica (optional).
 
 SkyServe will scale your service so that, ultimately, each replica manages approximately ``target_qps_per_replica`` queries per second.
 
-**Autoscaling will only be enabled if this value is specified.**
+**Autoscaling will only be enabled if this value is specified, or if**
+``autoscaling_metric`` is configured.
 
 .. code-block:: yaml
 
   service:
     replica_policy:
       target_qps_per_replica: 5
+
+
+.. _yaml-spec-service-replica-policy-autoscaling-metric:
+
+``service.replica_policy.autoscaling_metric``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Custom autoscaling metric configuration (optional).
+
+Use this to scale based on externally pushed metrics (e.g., concurrent users).
+This field is mutually exclusive with ``target_qps_per_replica``.
+
+.. code-block:: yaml
+
+  service:
+    replica_policy:
+      autoscaling_metric:
+        name: concurrent_users
+        target_per_replica: 5
+        kind: gauge            # gauge | rate
+        aggregation: max       # max | avg | last
+        window_seconds: 60
+        stale_after_seconds: 180
+
+Notes:
+
+- ``name``: Metric name to match incoming samples.
+- ``target_per_replica``: Target metric value per replica.
+- ``kind``: ``gauge`` uses aggregation over the window; ``rate`` treats values
+  as event counts and divides by ``window_seconds``.
+- ``aggregation``: Only applies to ``gauge`` metrics.
+- ``window_seconds``: Rolling window for metric calculation.
+- ``stale_after_seconds``: If no recent samples, metric is treated as 0.
 
 
 .. _yaml-spec-service-replica-policy-upscale-delay-seconds:
