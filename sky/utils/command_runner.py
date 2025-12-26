@@ -927,6 +927,13 @@ class KubernetesCommandRunner(CommandRunner):
 
         Args:
             node: The namespace and pod_name of the remote machine.
+            deployment: If set, run commands against `deployment/<deployment>`
+                instead of `pod/<pod_name>`.
+            container: If set, run commands inside the given container name via
+                `kubectl exec -c <container>`. This is recommended for
+                multi-container pods (e.g., when sidecars are injected) to
+                ensure commands target the primary workload container (such as
+                `ray-node`).
         """
         del kwargs
         super().__init__(node)

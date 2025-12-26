@@ -1186,6 +1186,13 @@ available_node_types:
         - name: skypilot-log-shipper
           imagePullPolicy: IfNotPresent
           image: timberio/vector:0.46.1-alpine
+          # The log shipper reads controller/service logs and writes to
+          # CloudWatch (via AWS creds injected by the pod's service account).
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           resources:
             requests:
               cpu: 50m
@@ -1197,6 +1204,7 @@ available_node_types:
           args:
             - |
               set -eu
+              set -o pipefail
 
               cluster_name="{{ cluster_name_on_cloud }}"
               service="${SKYPILOT_SERVICE:-}"
