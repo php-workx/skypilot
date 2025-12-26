@@ -1447,6 +1447,8 @@ available_node_types:
                 if [ "$ts" -gt 0 ] && [ $((now - ts)) -gt "$stale_secs" ]; then
                   echo "Lock appears stale (age=$((now - ts))s > ${stale_secs}s); attempting to steal: $lock_dir" >&2
                   rm -rf "$lock_dir" 2>/dev/null || true
+                  # avoid potential race condition between pods in lock stealing
+                  sleep $((RANDOM % 3))
                   continue
                 fi
                 sleep 5
