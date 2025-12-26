@@ -118,7 +118,8 @@ def test_external_metric_autoscaler_stale_metric():
 
 
 def test_external_metric_autoscaler_rate():
-    metric_spec = _build_metric_spec(kind='rate',
+    metric_spec = _build_metric_spec(name='interactions',
+                                     kind='rate',
                                      target_per_replica=2,
                                      window_seconds=10)
     spec = _build_service_spec(metric_spec)
