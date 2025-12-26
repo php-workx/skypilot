@@ -1186,6 +1186,13 @@ available_node_types:
         - name: skypilot-log-shipper
           imagePullPolicy: IfNotPresent
           image: timberio/vector:0.46.1-alpine
+          # The log shipper reads controller/service logs and writes to
+          # CloudWatch (via AWS creds injected by the pod's service account).
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           resources:
             requests:
               cpu: 50m
@@ -1197,6 +1204,7 @@ available_node_types:
           args:
             - |
               set -eu
+              set -o pipefail
 
               cluster_name="{{ cluster_name_on_cloud }}"
               service="${SKYPILOT_SERVICE:-}"
@@ -1447,6 +1455,8 @@ available_node_types:
                 if [ "$ts" -gt 0 ] && [ $((now - ts)) -gt "$stale_secs" ]; then
                   echo "Lock appears stale (age=$((now - ts))s > ${stale_secs}s); attempting to steal: $lock_dir" >&2
                   rm -rf "$lock_dir" 2>/dev/null || true
+                  # avoid potential race condition between pods in lock stealing
+                  sleep $((RANDOM % 3))
                   continue
                 fi
                 sleep 5
