@@ -3457,14 +3457,17 @@ def process_skypilot_pods(
 
             # Parse resources
             primary_container = get_pod_primary_container(pod)
+            resources = getattr(primary_container, 'resources', None)
+            requests = getattr(resources, 'requests',
+                               None) if resources else None
             cpu_request = parse_cpu_or_gpu_resource(
-                primary_container.resources.requests.get('cpu', '0'))
+                (requests.get('cpu', '0') if requests is not None else '0'))
             memory_request = parse_memory_resource(
-                primary_container.resources.requests.get('memory', '0'),
+                (requests.get('memory', '0') if requests is not None else '0'),
                 unit='G')
             gpu_count = parse_cpu_or_gpu_resource(
-                primary_container.resources.requests.get(
-                    get_gpu_resource_key(context), '0'))
+                (requests.get(get_gpu_resource_key(context), '0')
+                 if requests is not None else '0'))
             gpu_name = None
             if gpu_count > 0:
                 label_formatter, _ = (detect_gpu_label_formatter(context))

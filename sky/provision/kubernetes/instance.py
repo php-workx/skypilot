@@ -1471,7 +1471,21 @@ def get_cluster_info(
             head_spec = pod.spec
             assert head_spec is not None, pod
             primary_container = kubernetes_utils.get_pod_primary_container(pod)
-            cpu_request = primary_container.resources.requests['cpu']
+            resources = getattr(primary_container, 'resources', None)
+            requests = getattr(resources, 'requests',
+                               None) if resources else None
+            limits = getattr(resources, 'limits', None) if resources else None
+            cpu_request = None
+            if requests is not None:
+                cpu_request = requests.get('cpu')
+            if cpu_request is None and limits is not None:
+                cpu_request = limits.get('cpu')
+            if cpu_request is None:
+                container_name = getattr(primary_container, 'name', '<unknown>')
+                logger.warning(
+                    'Missing CPU request/limit for primary container %r in pod '
+                    '%r; defaulting Ray CPUs to 1.', container_name, pod_name)
+                cpu_request = '1'
 
     if cpu_request is None:
         raise RuntimeError(f'Pod {cluster_name_on_cloud}-head not found'
