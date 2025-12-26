@@ -915,6 +915,7 @@ class KubernetesCommandRunner(CommandRunner):
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
         deployment: Optional[str] = None,
+        container: Optional[str] = None,
         **kwargs,
     ):
         """Initialize KubernetesCommandRunner.
@@ -931,6 +932,7 @@ class KubernetesCommandRunner(CommandRunner):
         super().__init__(node)
         (self.namespace, self.context), self.pod_name = node
         self.deployment = deployment
+        self.container = container
 
     @property
     def node_id(self) -> str:
@@ -1050,6 +1052,8 @@ class KubernetesCommandRunner(CommandRunner):
             kubectl_args += ['--kubeconfig', '/dev/null']
 
         kubectl_args += [self.kube_identifier]
+        if self.container is not None:
+            kubectl_args += ['-c', self.container]
 
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
