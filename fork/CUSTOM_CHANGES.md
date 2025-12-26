@@ -148,7 +148,8 @@ if not credentials_available:
 **Description:** Add a Vector sidecar to SkyServe controller pods to ship SkyServe/service/replica logs to CloudWatch with per-service log groups and stable stream names per component.
 
 **Commits:**
-- (uncommitted) - feat(k8s/serve/logs): per-SkyServe-service CloudWatch groups + stable stream names via Vector sidecar
+- `cac7fbc57` - feat(k8s/logs): ship SkyServe logs with Vector sidecar
+- `ac36268ec` - feat(k8s): support multi-container (sidecar) SkyPilot pods by selecting ray-node as primary
 
 **Files:**
 - `sky/templates/kubernetes-ray.yml.j2` 🟡 (modified)
@@ -156,11 +157,25 @@ if not credentials_available:
   - Generate `/tmp/vector.yaml` at runtime and tail `/home/sky` SkyPilot logs
   - Compute `cw_group` / `cw_stream` per event and route CloudWatch sink via templates
   - Ensure only one overlapping controller pod ships to stable streams via a shared PVC lock (`$base/.sky/.logship.lock`)
+- `sky/provision/kubernetes/instance.py` 🟡 (modified)
+  - Remove the high-availability controller Deployment single-container assertion (sidecars are allowed)
+  - Ensure `kubectl exec` targets the primary container (`ray-node`) explicitly
+  - Guard against missing CPU requests/limits (fallback to 1 CPU with warning)
+- `sky/provision/kubernetes/utils.py` 🟡 (modified)
+  - Select the primary container by name (`ray-node`) for resource parsing (do not assume `containers[0]`)
+  - Guard against missing `resources.requests` when parsing pod resources
+- `sky/utils/command_runner.py` 🟡 (modified)
+  - Add `container=...` support to `KubernetesCommandRunner` and pass `kubectl exec -c <container>`
+- `sky/utils/command_runner.pyi` 🟡 (modified)
+  - Keep the type stub in sync with `KubernetesCommandRunner(container=...)`
+- `sky/utils/kubernetes/rsync_helper.sh` 🟡 (modified)
+  - Ensure rsync uses `kubectl exec -c` (default `ray-node`, override with `SKYPILOT_K8S_EXEC_CONTAINER`)
 
 **Environment Variables:**
 - `SKYPILOT_CW_LOG_GROUP_BASE` - CloudWatch log group prefix (default: `logs.aws.log_group_name` from `~/.sky/config.yaml`, else `/skypilot/serve`)
 - `SKYPILOT_CW_STREAM_PREFIX` - CloudWatch stream prefix (default: `logs.aws.log_stream_prefix` from `~/.sky/config.yaml`, else `skypilot-serve-`)
 - `AWS_REGION` / `AWS_DEFAULT_REGION` - required (best-effort default from `logs.aws.region` in `~/.sky/config.yaml`)
+- `SKYPILOT_K8S_EXEC_CONTAINER` - container name for `kubectl exec`/rsync (default: `ray-node`)
 
 **CloudWatch Layout:**
 - Per-service groups: `${SKYPILOT_CW_LOG_GROUP_BASE}/<skyserve_service_dir>`
