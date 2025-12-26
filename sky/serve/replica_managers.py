@@ -685,6 +685,9 @@ class ReplicaManager:
         self._uptime: Optional[float] = None
         self._update_mode = serve_utils.DEFAULT_UPDATE_MODE
         self._is_pool: bool = spec.pool
+        self._hard_max_replicas: int = ((spec.max_replicas if spec.max_replicas
+                                         is not None else spec.min_replicas) +
+                                        (spec.num_overprovision or 0))
         header_keys = None
         if spec.readiness_headers is not None:
             header_keys = list(spec.readiness_headers.keys())
@@ -863,6 +866,27 @@ class SkyPilotReplicaManager(ReplicaManager):
     @with_lock
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None) -> None:
+        # Global safety guard; default to disabled for backward compatibility.
+        # Config path: ~/.sky/config.yaml -> serve.strict_max_capacity
+        from sky import skypilot_config  # isort: skip  # pylint: disable=import-outside-toplevel
+        if not skypilot_config.get_nested(
+            ('serve', 'strict_max_capacity'), False):
+            self._launch_replica(self._next_replica_id, resources_override)
+            self._next_replica_id += 1
+            return
+
+        current_capacity = sum(
+            info.status in serve_state.CAPACITY_CONSUMING_REPLICA_STATUSES
+            for info in serve_state.get_replica_infos(self._service_name))
+        if current_capacity >= self._hard_max_replicas:
+            logger.warning(
+                'Hard max replicas cap hit for service %s: '
+                'current_capacity=%s hard_max_replicas=%s (skipping scale_up)',
+                self._service_name,
+                current_capacity,
+                self._hard_max_replicas,
+            )
+            return
         self._launch_replica(self._next_replica_id, resources_override)
         self._next_replica_id += 1
 
@@ -1472,6 +1496,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         self.latest_version = version
         self.yaml_content = yaml_content
         self._update_mode = update_mode
+        self._hard_max_replicas = ((spec.max_replicas if spec.max_replicas
+                                    is not None else spec.min_replicas) +
+                                   (spec.num_overprovision or 0))
 
         # Reuse all replicas that have the same config as the new version
         # (except for the `service` field) by directly setting the version to be

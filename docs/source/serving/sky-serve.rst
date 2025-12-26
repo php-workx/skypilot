@@ -7,9 +7,9 @@ SkyServe is SkyPilot's model serving library. SkyServe takes an existing serving
 framework and deploys it across one or more regions or clouds.
 
 .. warning::
-   
+
    SkyServe is currently in **beta**. It is well-suited for internal serving use cases (R&D, batch inference) but is not yet recommended for external/production serving. Expect rough edges.
-   
+
    As we actively develop SkyServe, we welcome `feedback <https://slack.skypilot.co>`_ and `contributions <https://github.com/skypilot-org/skypilot/blob/master/CONTRIBUTING.md>`_.
 
 .. * Serve on scarce resources (e.g., A100; spot) with **reduced costs and increased availability**
@@ -515,6 +515,14 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
   serve:
     # NOTE: these settings only take effect for a new SkyServe controller, not if
     # you have an existing one.
+
+    # Safety guard to prevent runaway spend when replicas get stuck in
+    # non-terminal states. When enabled, SkyServe will refuse to launch new
+    # replicas if the service is already at its configured max capacity.
+    #
+    # Default: false.
+    strict_max_capacity: true
+
     controller:
       # Enable high availability mode for the controller (optional).
       #

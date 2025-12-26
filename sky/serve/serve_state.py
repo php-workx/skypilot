@@ -252,6 +252,22 @@ _REPLICA_STATUS_TO_COLOR = {
     ReplicaStatus.UNKNOWN: colorama.Fore.RED,
 }
 
+# Replica statuses that are considered "capacity-consuming" for safety caps.
+# This is intentionally conservative: if a replica might still be incurring
+# cost (e.g., SHUTTING_DOWN or UNKNOWN), we count it towards the hard cap.
+CAPACITY_CONSUMING_REPLICA_STATUSES = frozenset([
+    ReplicaStatus.PENDING,
+    ReplicaStatus.PROVISIONING,
+    ReplicaStatus.STARTING,
+    ReplicaStatus.READY,
+    ReplicaStatus.NOT_READY,
+    ReplicaStatus.SHUTTING_DOWN,
+    # Conservatively treat UNKNOWN / FAILED_CLEANUP as capacity-consuming until
+    # proven otherwise, to avoid runaway spend on untracked resources.
+    ReplicaStatus.UNKNOWN,
+    ReplicaStatus.FAILED_CLEANUP,
+])
+
 
 class ServiceStatus(enum.Enum):
     """Service status as recorded in table 'services'."""

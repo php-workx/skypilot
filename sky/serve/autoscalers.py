@@ -70,6 +70,12 @@ def _generate_scale_down_decisions(
     ]
 
 
+def _count_capacity_consuming_replicas(
+        replica_infos: Iterable['replica_managers.ReplicaInfo']) -> int:
+    return sum(info.status in serve_state.CAPACITY_CONSUMING_REPLICA_STATUSES
+               for info in replica_infos)
+
+
 def _select_nonterminal_replicas_to_scale_down(
     num_replica_to_scale_down: int,
     replica_infos: Iterable['replica_managers.ReplicaInfo'],
@@ -351,7 +357,49 @@ class Autoscaler:
         if not scaling_decisions:
             logger.info('No scaling needed.')
 
-        return scaling_decisions
+        return self._enforce_hard_max_replicas(replica_infos, scaling_decisions)
+
+    def _enforce_hard_max_replicas(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+        scaling_decisions: List[AutoscalerDecision],
+    ) -> List[AutoscalerDecision]:
+        """Enforce a hard cap on scale-up decisions."""
+        # Global safety guard; default to disabled for backward compatibility.
+        # Config path: ~/.sky/config.yaml -> serve.strict_max_capacity
+        from sky import skypilot_config  # isort: skip  # pylint: disable=import-outside-toplevel
+
+        if not skypilot_config.get_nested(
+            ('serve', 'strict_max_capacity'), False):
+            return scaling_decisions
+
+        hard_max_replicas = self.max_replicas + (self.num_overprovision or 0)
+        current_capacity = _count_capacity_consuming_replicas(replica_infos)
+        allowed_scale_ups = max(0, hard_max_replicas - current_capacity)
+
+        kept: List[AutoscalerDecision] = []
+        kept_scale_ups = 0
+        dropped_scale_ups = 0
+        for decision in scaling_decisions:
+            if decision.operator == AutoscalerDecisionOperator.SCALE_UP:
+                if kept_scale_ups < allowed_scale_ups:
+                    kept.append(decision)
+                    kept_scale_ups += 1
+                else:
+                    dropped_scale_ups += 1
+            else:
+                kept.append(decision)
+
+        if dropped_scale_ups > 0:
+            logger.warning(
+                'Hard max replicas cap hit for service %s: '
+                'current_capacity=%s hard_max_replicas=%s dropped_scale_ups=%s',
+                self._service_name,
+                current_capacity,
+                hard_max_replicas,
+                dropped_scale_ups,
+            )
+        return kept
 
     def dump_dynamic_states(self) -> Dict[str, Any]:
         """Dump dynamic states from autoscaler."""

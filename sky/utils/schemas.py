@@ -1216,6 +1216,14 @@ def get_config_schema():
             }
         }
 
+    serve_schema = _get_controller_schema()
+    serve_schema['properties'].update({
+        'strict_max_capacity': {
+            'type': 'boolean',
+            'default': False,
+        },
+    })
+
     cloud_configs = {
         'aws': {
             'type': 'object',
@@ -1828,7 +1836,7 @@ def get_config_schema():
                 'type': 'string',
             },
             'jobs': _get_controller_schema(),
-            'serve': _get_controller_schema(),
+            'serve': serve_schema,
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
             'docker': docker_configs,
