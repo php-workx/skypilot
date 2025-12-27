@@ -1004,6 +1004,16 @@ def write_cluster_config(
                 # High availability
                 'high_availability': high_availability_specified,
 
+                # Kubernetes SkyServe log shipper (Vector sidecar) image.
+                # Used by sky/templates/kubernetes-ray.yml.j2 for SkyServe
+                # controller pods; configurable for easier upgrades.
+                'serve_controller_log_shipper_vector_image':
+                    skypilot_config.get_nested(
+                        ('serve', 'controller', 'log_shipper', 'vector_image'),
+                        os.environ.get(
+                            'SKYPILOT_SERVE_LOG_SHIPPER_VECTOR_IMAGE',
+                            'timberio/vector:0.52.0-alpine')),
+
                 # Volume mounts
                 'volume_mounts': volume_mount_vars,
                 'ephemeral_volume_mounts': ephemeral_volume_mount_vars,
