@@ -1185,7 +1185,7 @@ available_node_types:
         {% if 'sky-serve-controller' in cluster_name_on_cloud %}
         - name: skypilot-log-shipper
           imagePullPolicy: IfNotPresent
-          image: timberio/vector:0.52.0-alpine
+          image: {{ serve_controller_log_shipper_vector_image }}
           # The log shipper reads controller/service logs and writes to
           # CloudWatch (via AWS creds injected by the pod's service account).
           securityContext:
@@ -1226,9 +1226,16 @@ available_node_types:
               # - SKYPILOT_CW_LOG_GROUP_BASE: CloudWatch log group prefix (groups are created under this)
               # - SKYPILOT_CW_STREAM_PREFIX: CloudWatch stream prefix (stream names are stable per component)
               base="/home/sky"
+              sleep_with_warning() {
+                # Log periodically instead of sleeping forever silently.
+                msg="$1"
+                while true; do
+                  echo "ERROR: $msg" >&2
+                  sleep 300
+                done
+              }
               if [ ! -d "$base" ]; then
-                echo "ERROR: expected SkyPilot logs under /home/sky but directory is missing; cannot ship logs to CloudWatch." >&2
-                sleep infinity
+                sleep_with_warning "expected SkyPilot logs under /home/sky but directory is missing; cannot ship logs to CloudWatch."
               fi
               cfg="$base/.sky/config.yaml"
 
@@ -1320,8 +1327,7 @@ available_node_types:
                 export AWS_DEFAULT_REGION="$region"
               fi
               if [ -z "${AWS_REGION:-}" ]; then
-                echo "ERROR: AWS_REGION/AWS_DEFAULT_REGION not set and no region found in $cfg; cannot ship logs to CloudWatch." >&2
-                sleep infinity
+                sleep_with_warning "AWS_REGION/AWS_DEFAULT_REGION not set and no region found in $cfg; cannot ship logs to CloudWatch."
               fi
 
               mkdir -p "$base/.vector" "$base/.sky"

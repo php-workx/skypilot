@@ -434,9 +434,17 @@ spec:
             export AWS_REGION="$region"
             export AWS_DEFAULT_REGION="$region"
           fi
+          sleep_with_warning() {
+            # Log periodically instead of sleeping forever silently.
+            msg="$1"
+            while true; do
+              echo "ERROR: $msg" >&2
+              sleep 300
+            done
+          }
+
           if [ -z "${AWS_REGION:-}" ]; then
-            echo "ERROR: AWS_REGION is not set; cannot ship logs to CloudWatch." >&2
-            sleep infinity
+            sleep_with_warning "AWS_REGION is not set; cannot ship logs to CloudWatch."
           fi
 
           base="/root"
@@ -445,8 +453,7 @@ spec:
 
           log_group="{{ .Values.apiService.taskLogs.cloudwatch.logGroupName }}"
           if [ -z "$log_group" ]; then
-            echo "ERROR: logGroupName is empty; refusing to start log shipper." >&2
-            sleep infinity
+            sleep_with_warning "logGroupName is empty; refusing to start log shipper."
           fi
 
           # Keep Vector state per-pod (even if PVC is shared) to avoid collisions.
