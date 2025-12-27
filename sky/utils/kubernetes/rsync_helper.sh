@@ -1,4 +1,9 @@
 #!/bin/bash
+# IMPORTANT: This script is used as rsync's "remote shell" (`rsync -e ...`).
+# It must preserve argv boundaries exactly; printing to stdout will corrupt the
+# rsync protocol (stderr is OK).
+set -euo pipefail
+
 # We need to determine the pod, namespace and context from the args
 # For backward compatibility, we use + as the separator between namespace and context and add handling when context is not provided
 if [ "$1" = "-l" ]; then
@@ -51,9 +56,9 @@ fi
 if [ -z "$context" ] || [ "$context_lower" = "none" ]; then
     # If context is none, it means we are using incluster auth. In this case,
     # we need to set KUBECONFIG to /dev/null to avoid using kubeconfig file.
-    kubectl_cmd_base="kubectl exec \"$resource_type/$resource_name\" -n \"$namespace\" -c \"$container\" --kubeconfig=/dev/null --"
+    kubectl_args=(kubectl exec "$resource_type/$resource_name" -n "$namespace" -c "$container" --kubeconfig=/dev/null)
 else
-    kubectl_cmd_base="kubectl exec \"$resource_type/$resource_name\" -n \"$namespace\" -c \"$container\" --context=\"$context\" --"
+    kubectl_args=(kubectl exec "$resource_type/$resource_name" -n "$namespace" -c "$container" --context="$context")
 fi
 
 # Execute command on remote pod, waiting for rsync to be available first.
@@ -63,4 +68,19 @@ fi
 # Timeout after MAX_WAIT_TIME_SECONDS seconds.
 MAX_WAIT_TIME_SECONDS=300
 max_wait_iterations=$((MAX_WAIT_TIME_SECONDS * 2))
-eval "${kubectl_cmd_base% --} -i -- bash -c 'max_count=$1; shift; count=0; until which rsync >/dev/null 2>&1; do if [ $count -ge $max_count ]; then echo \"Error when trying to rsync files to kubernetes cluster. Package installation may have failed.\" >&2; exit 1; fi; sleep 0.5; count=$((count+1)); done; exec \"$@\"' -- \"$max_wait_iterations\" \"\$@\""
+
+# Do NOT use eval here: it will expand $1/$@ in the local shell (this script)
+# and collapse argv, breaking rsync's remote protocol invocation.
+"${kubectl_args[@]}" -i -- bash --norc --noprofile -c '
+	max_count="$1"; shift
+	count=0
+	until command -v rsync >/dev/null 2>&1; do
+	  if [ "$count" -ge "$max_count" ]; then
+	    echo "Error when trying to rsync files to kubernetes cluster. Package installation may have failed." >&2
+	    exit 1
+	  fi
+	  sleep 0.5
+	  count=$((count+1))
+	done
+	exec "$@"
+	' -- "$max_wait_iterations" "$@"
