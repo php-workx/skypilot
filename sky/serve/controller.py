@@ -155,6 +155,27 @@ class SkyServeController:
             return responses.JSONResponse(
                 content={'replica_info': replica_info}, status_code=200)
 
+        @self._app.post('/controller/metrics')
+        async def push_external_metrics(
+                request: fastapi.Request) -> fastapi.Response:
+            request_data = await request.json()
+            if not isinstance(request_data, dict):
+                return responses.JSONResponse(content={
+                    'message': 'Error: request body must be a JSON '
+                               'object.'
+                },
+                                              status_code=400)
+            metric_samples = request_data.get('metrics', [])
+            if not isinstance(metric_samples, list):
+                return responses.JSONResponse(
+                    content={'message': 'Error: metrics must be a list.'},
+                    status_code=400)
+            logger.info('Received %s external metric samples.',
+                        len(metric_samples))
+            self._autoscaler.collect_external_metrics(metric_samples)
+            return responses.JSONResponse(content={'message': 'Success'},
+                                          status_code=200)
+
         @self._app.post('/controller/update_service')
         async def update_service(request: fastapi.Request) -> fastapi.Response:
             request_data = await request.json()
