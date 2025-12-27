@@ -1189,6 +1189,11 @@ available_node_types:
           # The log shipper reads controller/service logs and writes to
           # CloudWatch (via AWS creds injected by the pod's service account).
           securityContext:
+            # Match SkyPilot's default user/group ownership under /home/sky
+            # (used by the shared PVC in high availability mode).
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
             allowPrivilegeEscalation: false
             capabilities:
               drop:
@@ -1218,7 +1223,7 @@ available_node_types:
 
               # Best-effort load defaults from ~/.sky/config.yaml (if present).
               # Users can override via env vars:
-              # - SKYPILOT_CW_LOG_GROUP_BASE: CloudWatch log group prefix (per-service groups are created under this)
+              # - SKYPILOT_CW_LOG_GROUP_BASE: CloudWatch log group prefix (groups are created under this)
               # - SKYPILOT_CW_STREAM_PREFIX: CloudWatch stream prefix (stream names are stable per component)
               base="/home/sky"
               if [ ! -d "$base" ]; then
@@ -1227,7 +1232,6 @@ available_node_types:
               fi
               cfg="$base/.sky/config.yaml"
 
-              log_group=""
               stream_prefix=""
               region=""
               if [ -f "$cfg" ]; then
@@ -1289,17 +1293,14 @@ available_node_types:
                     }' "$cfg"
                 }
 
-                log_group="$(extract_cfg_value log_group_name)"
                 stream_prefix="$(extract_cfg_value log_stream_prefix)"
                 region="$(extract_cfg_value region)"
               fi
 
-              # Base log group prefix; actual group becomes "${SKYPILOT_CW_LOG_GROUP_BASE}/<skyserve_service>".
-              if [ -z "${SKYPILOT_CW_LOG_GROUP_BASE:-}" ] && [ -n "$log_group" ]; then
-                export SKYPILOT_CW_LOG_GROUP_BASE="$log_group"
-              else
-                export SKYPILOT_CW_LOG_GROUP_BASE="${SKYPILOT_CW_LOG_GROUP_BASE:-/skypilot/serve}"
-              fi
+              # Base log group prefix; groups become:
+              # - controller: "${SKYPILOT_CW_LOG_GROUP_BASE}/controller"
+              # - service: "${SKYPILOT_CW_LOG_GROUP_BASE}/<skyserve_service>"
+              export SKYPILOT_CW_LOG_GROUP_BASE="${SKYPILOT_CW_LOG_GROUP_BASE:-/skypilot/serve}"
 
               # Optional stream prefix; actual stream becomes "${SKYPILOT_CW_STREAM_PREFIX}<component>".
               if [ -z "${SKYPILOT_CW_STREAM_PREFIX:-}" ]; then
@@ -1394,12 +1395,13 @@ available_node_types:
 
                     # CloudWatch routing:
                     # - Per-service groups: "${SKYPILOT_CW_LOG_GROUP_BASE}/<skyserve_service>".
+                    # - Controller group: "${SKYPILOT_CW_LOG_GROUP_BASE}/controller".
                     # - Stable streams per component, with optional prefix: "${SKYPILOT_CW_STREAM_PREFIX}<stream>".
                     group_base = get_env_var("SKYPILOT_CW_LOG_GROUP_BASE") ?? "/skypilot/serve"
                     stream_prefix = get_env_var("SKYPILOT_CW_STREAM_PREFIX") ?? ""
                     svc_group = .skyserve_service_dir
                     if svc_group == null {
-                      svc_group = "_controller"
+                      svc_group = "controller"
                     }
                     .cw_group = group_base + "/" + svc_group
 
