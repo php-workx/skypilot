@@ -147,6 +147,8 @@ if not credentials_available:
 
 **Description:** Add a Vector sidecar to SkyServe controller pods to ship SkyServe/service/replica logs to CloudWatch with per-service log groups and stable stream names per component.
 
+**Vector Image:** `timberio/vector:0.52.0-alpine`
+
 **Commits:**
 - `cac7fbc57` - feat(k8s/logs): ship SkyServe logs with Vector sidecar
 - `ac36268ec` - feat(k8s): support multi-container (sidecar) SkyPilot pods by selecting ray-node as primary

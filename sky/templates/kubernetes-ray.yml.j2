@@ -1185,7 +1185,7 @@ available_node_types:
         {% if 'sky-serve-controller' in cluster_name_on_cloud %}
         - name: skypilot-log-shipper
           imagePullPolicy: IfNotPresent
-          image: timberio/vector:0.46.1-alpine
+          image: timberio/vector:0.52.0-alpine
           # The log shipper reads controller/service logs and writes to
           # CloudWatch (via AWS creds injected by the pod's service account).
           securityContext:

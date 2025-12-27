@@ -168,7 +168,7 @@ apiService:
       # CloudWatch log group for request/task logs.
       logGroupName: /skypilot/api-server/tasks
       # Vector image used for log shipping.
-      vectorImage: timberio/vector:0.46.1-alpine
+      vectorImage: timberio/vector:0.52.0-alpine
       # Resource requests/limits for the Vector sidecar.
       resources:
         requests:
