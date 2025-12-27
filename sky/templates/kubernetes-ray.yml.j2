@@ -1189,6 +1189,11 @@ available_node_types:
           # The log shipper reads controller/service logs and writes to
           # CloudWatch (via AWS creds injected by the pod's service account).
           securityContext:
+            # Match SkyPilot's default user/group ownership under /home/sky
+            # (used by the shared PVC in high availability mode).
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
             allowPrivilegeEscalation: false
             capabilities:
               drop:
