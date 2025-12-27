@@ -160,6 +160,24 @@ apiService:
   # @schema type: [array, null]; item: object
   extraVolumes: null
 
+  taskLogs:
+    cloudwatch:
+      # Ship API request/task logs (sky api logs <request_id>) from
+      # ~/sky_logs/api_server/requests/*.log to CloudWatch.
+      enabled: false
+      # CloudWatch log group for request/task logs.
+      logGroupName: /skypilot/api-server/tasks
+      # Vector image used for log shipping.
+      vectorImage: timberio/vector:0.46.1-alpine
+      # Resource requests/limits for the Vector sidecar.
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+
   # Extra volume mounts to mount to the API server. Example:
   # extraVolumeMounts:
   #   - name: my-volume

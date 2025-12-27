@@ -262,6 +262,11 @@ spec:
         - name: state-volume
           mountPath: /root/.sky
           subPath: .sky
+        {{- if .Values.apiService.taskLogs.cloudwatch.enabled }}
+        - name: state-volume
+          mountPath: /root/sky_logs
+          subPath: sky_logs
+        {{- end }}
         {{- if .Values.storage.enabled }}
         - name: state-volume
           mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
@@ -339,6 +344,168 @@ spec:
         {{- if .Values.apiService.extraVolumeMounts }}
         {{- toYaml .Values.apiService.extraVolumeMounts | nindent 8 }}
         {{- end }}
+
+      {{- if .Values.apiService.taskLogs.cloudwatch.enabled }}
+      - name: skypilot-task-log-shipper
+        imagePullPolicy: IfNotPresent
+        image: {{ .Values.apiService.taskLogs.cloudwatch.vectorImage | quote }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+        resources:
+          {{- toYaml .Values.apiService.taskLogs.cloudwatch.resources | nindent 10 }}
+        command: ["/bin/sh", "-lc"]
+        args:
+        - |
+          set -eu
+          set -o pipefail
+
+          if [ -z "${AWS_REGION:-}" ] && [ -n "${AWS_DEFAULT_REGION:-}" ]; then
+            export AWS_REGION="$AWS_DEFAULT_REGION"
+          elif [ -z "${AWS_DEFAULT_REGION:-}" ] && [ -n "${AWS_REGION:-}" ]; then
+            export AWS_DEFAULT_REGION="$AWS_REGION"
+          fi
+
+          cfg="/root/.sky/config.yaml"
+          region=""
+          if [ -f "$cfg" ] && [ -z "${AWS_REGION:-}" ]; then
+            extract_cfg_value() {
+              want="$1"
+              awk -v want="$want" '
+                function strip(s) {
+                  gsub(/^[ \t"]+/, "", s);
+                  gsub(/[ \t"\r]+$/, "", s);
+                  return s;
+                }
+                function indent(s) {
+                  match(s, /^[ ]*/);
+                  return RLENGTH;
+                }
+                BEGIN {
+                  in_logs = 0;
+                  logs_indent = -1;
+                  in_aws = 0;
+                  aws_indent = -1;
+                  val = "";
+                }
+                {
+                  line = $0;
+                  trimmed = line;
+                  sub(/^[ ]*/, "", trimmed);
+                  if (trimmed == "" || trimmed ~ /^#/) {
+                    next;
+                  }
+
+                  ind = indent(line);
+                  if (trimmed ~ /^logs:[ \t]*$/) {
+                    in_logs = 1;
+                    logs_indent = ind;
+                    in_aws = 0;
+                    next;
+                  }
+                  if (in_logs && ind <= logs_indent) {
+                    in_logs = 0;
+                    in_aws = 0;
+                  }
+
+                  if (in_logs && trimmed ~ /^aws:[ \t]*$/) {
+                    in_aws = 1;
+                    aws_indent = ind;
+                    next;
+                  }
+                  if (in_aws && ind <= aws_indent) {
+                    in_aws = 0;
+                  }
+
+                  if (in_aws && trimmed ~ ("^" want ":[ \t]*")) {
+                    sub(("^" want ":[ \t]*"), "", trimmed);
+                    val = strip(trimmed);
+                  }
+                }
+                END {
+                  print val;
+                }' "$cfg"
+            }
+            region="$(extract_cfg_value region)"
+          fi
+          if [ -z "${AWS_REGION:-}" ] && [ -n "$region" ]; then
+            export AWS_REGION="$region"
+            export AWS_DEFAULT_REGION="$region"
+          fi
+          if [ -z "${AWS_REGION:-}" ]; then
+            echo "ERROR: AWS_REGION is not set; cannot ship logs to CloudWatch." >&2
+            sleep infinity
+          fi
+
+          base="/root"
+          mkdir -p "$base/.vector" "$base/sky_logs/api_server/requests"
+          export VECTOR_DATA_DIR="${VECTOR_DATA_DIR:-$base/.vector}"
+
+          log_group="{{ .Values.apiService.taskLogs.cloudwatch.logGroupName }}"
+          if [ -z "$log_group" ]; then
+            echo "ERROR: logGroupName is empty; refusing to start log shipper." >&2
+            sleep infinity
+          fi
+
+          # Keep Vector state per-pod (even if PVC is shared) to avoid collisions.
+          vector_state_dir="$VECTOR_DATA_DIR/${POD_NAME:-unknown}"
+          mkdir -p "$vector_state_dir"
+
+          cat >/tmp/vector.yaml <<'YAML'
+          data_dir: ${VECTOR_DATA_DIR}/${POD_NAME}
+
+          sources:
+            api_request_logs:
+              type: file
+              include:
+                - /root/sky_logs/api_server/requests/*.log
+              read_from: beginning
+
+          transforms:
+            enrich:
+              type: remap
+              inputs: [api_request_logs]
+              source: |
+                .source_path = string!(.file)
+                req = parse_regex(.source_path, r'/requests/(?P<request_id>[^/]+)\\.log$') ?? null
+                if req != null { .request_id = req.request_id }
+                .pod_name = get_env_var("POD_NAME") ?? "unknown"
+
+          sinks:
+            cloudwatch:
+              type: aws_cloudwatch_logs
+              inputs: [enrich]
+              region: ${AWS_REGION}
+              group_name: ${SKYPILOT_API_TASK_LOG_GROUP}
+              stream_name: ${POD_NAME}
+              encoding:
+                codec: json
+          YAML
+
+          exec vector --config /tmp/vector.yaml
+        env:
+        {{- with $.Values.global.extraEnvs }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: SKYPILOT_API_TASK_LOG_GROUP
+          value: {{ .Values.apiService.taskLogs.cloudwatch.logGroupName | quote }}
+        volumeMounts:
+        - name: state-volume
+          mountPath: /root/.sky
+          subPath: .sky
+        - name: state-volume
+          mountPath: /root/sky_logs
+          subPath: sky_logs
+        - name: state-volume
+          mountPath: /root/.vector
+          subPath: .vector
+      {{- end }}
       {{- if .Values.apiService.logs.retention.enabled }}
       - name: logrotate
         image: {{ include "common.image" (dict "root" . "image" .Values.apiService.image) }}
