@@ -1013,6 +1013,18 @@ def write_cluster_config(
                         os.environ.get(
                             'SKYPILOT_SERVE_LOG_SHIPPER_VECTOR_IMAGE',
                             'timberio/vector:0.52.0-alpine')),
+                # Optional ConfigMap name for overriding the Vector config used
+                # by the SkyServe controller log shipper sidecar.
+                # If the ConfigMap exists and contains key 'vector.yaml', the
+                # sidecar will use it; otherwise it falls back to the built-in
+                # config and logs a warning.
+                'serve_controller_log_shipper_vector_configmap_name':
+                    skypilot_config.get_nested(
+                        ('serve', 'controller', 'log_shipper',
+                         'vector_configmap_name'),
+                        os.environ.get(
+                            'SKYPILOT_SERVE_LOG_SHIPPER_VECTOR_CONFIGMAP_NAME',
+                            'skypilot-serve-log-shipper-vector')),
 
                 # Volume mounts
                 'volume_mounts': volume_mount_vars,
