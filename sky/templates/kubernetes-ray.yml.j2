@@ -453,6 +453,15 @@ available_node_types:
         - name: dshm
           emptyDir:
             medium: Memory
+        {% if 'sky-serve-controller' in cluster_name_on_cloud %}
+        - name: skypilot-serve-log-shipper-config
+          configMap:
+            name: {{ serve_controller_log_shipper_vector_configmap_name }}
+            optional: true
+            items:
+              - key: vector.yaml
+                path: vector.yaml
+        {% endif %}
         {% if k8s_fuse_device_required %}
         - name: fusermount-shared-dir
           hostPath:
@@ -1444,6 +1453,19 @@ available_node_types:
                     codec: json
               YAML
 
+              # Prefer a ConfigMap-provided Vector config if it exists.
+              # This enables operators to customize log collection/routing
+              # without changing SkyPilot templates.
+              config_path="/tmp/vector.yaml"
+              watch_config_flag=""
+              if [ -s /etc/vector/vector.yaml ]; then
+                echo "INFO: Using Vector config from ConfigMap '{{ serve_controller_log_shipper_vector_configmap_name }}'." >&2
+                config_path="/etc/vector/vector.yaml"
+                watch_config_flag="--watch-config"
+              else
+                echo "WARNING: Vector ConfigMap '{{ serve_controller_log_shipper_vector_configmap_name }}' (key: vector.yaml) not found; using built-in config." >&2
+              fi
+
               # Acquire a shared-PVC lock so only one overlapping pod ships to the
               # (stable) CloudWatch log stream at a time.
               lock_dir="$base/.sky/.logship.lock"
@@ -1484,9 +1506,12 @@ available_node_types:
                 done
               ) &
 
-              exec vector --config /tmp/vector.yaml
+              exec vector --config "$config_path" $watch_config_flag
 
           volumeMounts:
+          - name: skypilot-serve-log-shipper-config
+            mountPath: /etc/vector
+            readOnly: true
           {% if high_availability %}
           - name: {{k8s_high_availability_deployment_volume_mount_name}}
             mountPath: {{k8s_high_availability_deployment_volume_mount_path}}
