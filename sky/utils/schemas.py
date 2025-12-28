@@ -208,26 +208,49 @@ def _get_single_resources_schema():
             },
             'job_recovery': {
                 # Either a string or a dict.
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'object',
-                    'required': [],
-                    'additionalProperties': False,
-                    'properties': {
-                        'strategy': {
-                            'anyOf': [{
-                                'type': 'string',
-                            }, {
-                                'type': 'null',
-                            }],
-                        },
-                        'max_restarts_on_errors': {
-                            'type': 'integer',
-                            'minimum': 0,
-                        },
+                'anyOf': [
+                    {
+                        'type': 'string',
+                    },
+                    {
+                        'type': 'object',
+                        'required': [],
+                        'additionalProperties': False,
+                        'properties': {
+                            'strategy': {
+                                'anyOf': [{
+                                    'type': 'string',
+                                }, {
+                                    'type': 'null',
+                                }],
+                            },
+                            'max_restarts_on_errors': {
+                                'type': 'integer',
+                                'minimum': 0,
+                            },
+                            'recover_on_exit_codes': {
+                                'anyOf': [
+                                    {
+                                        # Single exit code
+                                        'type': 'integer',
+                                        'minimum': 0,
+                                        'maximum': 255,
+                                    },
+                                    {
+                                        # List of exit codes
+                                        'type': 'array',
+                                        'items': {
+                                            'type': 'integer',
+                                            'minimum': 0,
+                                            'maximum': 255,
+                                        },
+                                        'uniqueItems': True,
+                                    },
+                                ],
+                            },
+                        }
                     }
-                }],
+                ],
             },
             'volumes': {
                 'type': 'array',
@@ -689,6 +712,36 @@ def get_service_schema():
                                 'additionalProperties': False,
                             }
                         ]
+                    },
+                    'autoscaling_metric': {
+                        'type': 'object',
+                        'required': ['name', 'target_per_replica'],
+                        'additionalProperties': False,
+                        'properties': {
+                            'name': {
+                                'type': 'string',
+                            },
+                            'target_per_replica': {
+                                'type': 'number',
+                                'minimum': 0,
+                            },
+                            'kind': {
+                                'type': 'string',
+                                'case_insensitive_enum': ['gauge', 'rate'],
+                            },
+                            'aggregation': {
+                                'type': 'string',
+                                'case_insensitive_enum': ['avg', 'max', 'last'],
+                            },
+                            'window_seconds': {
+                                'type': 'integer',
+                                'minimum': 1,
+                            },
+                            'stale_after_seconds': {
+                                'type': 'integer',
+                                'minimum': 1,
+                            },
+                        },
                     },
                     'dynamic_ondemand_fallback': {
                         'type': 'boolean',
@@ -1401,6 +1454,27 @@ def get_config_schema():
                 **_CONTEXT_CONFIG_SCHEMA_MINIMAL,
             }
         },
+        'slurm': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'allowed_clusters': {
+                    'oneOf': [{
+                        'type': 'array',
+                        'items': {
+                            'type': 'string',
+                        },
+                    }, {
+                        'type': 'string',
+                        'pattern': '^all$'
+                    }]
+                },
+                'provision_timeout': {
+                    'type': 'integer',
+                },
+            }
+        },
         'oci': {
             'type': 'object',
             'required': [],
@@ -1434,6 +1508,16 @@ def get_config_schema():
                     },
                 }
             },
+        },
+        'vast': {
+            'type': 'object',
+            'required': [],
+            'additionalProperties': False,
+            'properties': {
+                'datacenter_only': {
+                    'type': 'boolean',
+                },
+            }
         },
         'nebius': {
             'type': 'object',
