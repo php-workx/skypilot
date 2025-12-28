@@ -1,3 +1,4 @@
+{{- $vector := .Values.apiService.observability.vector -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -262,7 +263,7 @@ spec:
         - name: state-volume
           mountPath: /root/.sky
           subPath: .sky
-        {{- if .Values.apiService.taskLogs.cloudwatch.enabled }}
+        {{- if $vector.enabled }}
         - name: state-volume
           mountPath: /root/sky_logs
           subPath: sky_logs
@@ -345,95 +346,22 @@ spec:
         {{- toYaml .Values.apiService.extraVolumeMounts | nindent 8 }}
         {{- end }}
 
-      {{- if .Values.apiService.taskLogs.cloudwatch.enabled }}
-      - name: skypilot-task-log-shipper
+      {{- if $vector.enabled }}
+      - name: log-shipper
         imagePullPolicy: IfNotPresent
-        image: {{ .Values.apiService.taskLogs.cloudwatch.vectorImage | quote }}
+        image: {{ $vector.image | quote }}
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
             drop:
               - ALL
         resources:
-          {{- toYaml .Values.apiService.taskLogs.cloudwatch.resources | nindent 10 }}
+          {{- toYaml $vector.resources | nindent 10 }}
         command: ["/bin/sh", "-lc"]
         args:
         - |
           set -eu
           set -o pipefail
-
-          if [ -z "${AWS_REGION:-}" ] && [ -n "${AWS_DEFAULT_REGION:-}" ]; then
-            export AWS_REGION="$AWS_DEFAULT_REGION"
-          elif [ -z "${AWS_DEFAULT_REGION:-}" ] && [ -n "${AWS_REGION:-}" ]; then
-            export AWS_DEFAULT_REGION="$AWS_REGION"
-          fi
-
-          cfg="/root/.sky/config.yaml"
-          region=""
-          if [ -f "$cfg" ] && [ -z "${AWS_REGION:-}" ]; then
-            extract_cfg_value() {
-              want="$1"
-              awk -v want="$want" '
-                function strip(s) {
-                  gsub(/^[ \t"]+/, "", s);
-                  gsub(/[ \t"\r]+$/, "", s);
-                  return s;
-                }
-                function indent(s) {
-                  match(s, /^[ ]*/);
-                  return RLENGTH;
-                }
-                BEGIN {
-                  in_logs = 0;
-                  logs_indent = -1;
-                  in_aws = 0;
-                  aws_indent = -1;
-                  val = "";
-                }
-                {
-                  line = $0;
-                  trimmed = line;
-                  sub(/^[ ]*/, "", trimmed);
-                  if (trimmed == "" || trimmed ~ /^#/) {
-                    next;
-                  }
-
-                  ind = indent(line);
-                  if (trimmed ~ /^logs:[ \t]*$/) {
-                    in_logs = 1;
-                    logs_indent = ind;
-                    in_aws = 0;
-                    next;
-                  }
-                  if (in_logs && ind <= logs_indent) {
-                    in_logs = 0;
-                    in_aws = 0;
-                  }
-
-                  if (in_logs && trimmed ~ /^aws:[ \t]*$/) {
-                    in_aws = 1;
-                    aws_indent = ind;
-                    next;
-                  }
-                  if (in_aws && ind <= aws_indent) {
-                    in_aws = 0;
-                  }
-
-                  if (in_aws && trimmed ~ ("^" want ":[ \t]*")) {
-                    sub(("^" want ":[ \t]*"), "", trimmed);
-                    val = strip(trimmed);
-                  }
-                }
-                END {
-                  print val;
-                }' "$cfg"
-            }
-            region="$(extract_cfg_value region)"
-          fi
-          if [ -z "${AWS_REGION:-}" ] && [ -n "$region" ]; then
-            export AWS_REGION="$region"
-            export AWS_DEFAULT_REGION="$region"
-          fi
           sleep_with_warning() {
             # Log periodically instead of sleeping forever silently.
             msg="$1"
@@ -443,15 +371,21 @@ spec:
             done
           }
 
+          if [ -z "${AWS_REGION:-}" ] && [ -n "${AWS_DEFAULT_REGION:-}" ]; then
+            export AWS_REGION="$AWS_DEFAULT_REGION"
+          elif [ -z "${AWS_DEFAULT_REGION:-}" ] && [ -n "${AWS_REGION:-}" ]; then
+            export AWS_DEFAULT_REGION="$AWS_REGION"
+          fi
+
           if [ -z "${AWS_REGION:-}" ]; then
-            sleep_with_warning "AWS_REGION is not set; cannot ship logs to CloudWatch."
+            sleep_with_warning "AWS_REGION is not set; cannot ship logs to CloudWatch. Set it via apiService.observability.vector.extraEnvs."
           fi
 
           base="/root"
           mkdir -p "$base/.vector" "$base/sky_logs/api_server/requests"
           export VECTOR_DATA_DIR="${VECTOR_DATA_DIR:-$base/.vector}"
 
-          log_group="{{ .Values.apiService.taskLogs.cloudwatch.logGroupName }}"
+          log_group="${SKYPILOT_API_TASK_LOG_GROUP:-}"
           if [ -z "$log_group" ]; then
             sleep_with_warning "logGroupName is empty; refusing to start log shipper."
           fi
@@ -493,7 +427,7 @@ spec:
 
           exec vector --config /tmp/vector.yaml
         env:
-        {{- with $.Values.global.extraEnvs }}
+        {{- with $vector.extraEnvs }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
         - name: POD_NAME
@@ -501,7 +435,7 @@ spec:
             fieldRef:
               fieldPath: metadata.name
         - name: SKYPILOT_API_TASK_LOG_GROUP
-          value: {{ .Values.apiService.taskLogs.cloudwatch.logGroupName | quote }}
+          value: {{ $vector.sinks.cloudwatchLogs.logGroupName | quote }}
         volumeMounts:
         - name: state-volume
           mountPath: /root/.sky
