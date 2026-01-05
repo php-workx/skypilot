@@ -56,6 +56,7 @@ RUN cd /skypilot && \
 FROM python:3.10.18-slim
 
 ARG INSTALL_FROM_SOURCE=true
+ARG SKYPILOT_GIT_URL
 
 # Copy Google Cloud SDK from Stage 1
 COPY --from=gcloud-apt-install /usr/lib/google-cloud-sdk /opt/google-cloud-sdk
