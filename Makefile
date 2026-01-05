@@ -12,14 +12,27 @@ all: help ## Alias for help (conventional)
 
 test: test-local ## Alias for test-local (conventional)
 
-# Python and environment settings
+# --- Environment Configuration ---
+# Auto-detect the environment to support both local (uv) and container (conda) setups.
+
+# Default to a local .venv directory for uv
 PYTHON_VERSION := 3.10
-VENV_DIR := /opt/conda/
+VENV_DIR := .venv
+PIP_INSTALL_SUFFIX :=
+
+# If CONDA_PREFIX is set, we're in a conda environment. Override defaults.
+ifneq ($(strip $(CONDA_PREFIX)),)
+    VENV_DIR := $(CONDA_PREFIX)
+    PIP_INSTALL_SUFFIX := --system
+endif
+
+# Define executables based on the dynamically set VENV_DIR
 PYTHON := $(VENV_DIR)/bin/python
 PYTEST := $(VENV_DIR)/bin/pytest
 UV := uv
 
 # Test environment variables
+export SKYPILOT_DEV := 1
 export SKYPILOT_DISABLE_USAGE_COLLECTION := 1
 export SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK := 1
 
@@ -34,21 +47,27 @@ help: ## Display this help message
 
 ##@ Setup
 
-install: ## Install dependencies using uv (creates venv if needed)
-	@echo "📦 Installing SkyPilot with dependencies..."
-	@echo "Installing Azure CLI (with pre-release workaround)..."
-	@$(UV) pip install --prerelease=allow "azure-cli>=2.65.0" --system
-	@echo "Installing SkyPilot in editable mode..."
-	@$(UV) pip install -e ".[all]" --system
-	@echo "Installing dev dependencies from requirements-dev.txt..."
-	@$(UV) pip install -r requirements-dev.txt --system
+install: ## Install dependencies using uv (adapts to conda or local venv)
+	@if [ "$(PIP_INSTALL_SUFFIX)" = "--system" ]; then \
+		echo "📦 Conda environment detected. Installing dependencies with uv..."; \
+	else \
+		echo "📦 Local environment detected. Setting up virtual env with uv..."; \
+		if [ ! -d "$(VENV_DIR)" ]; then \
+			echo "Creating virtual environment in $(VENV_DIR) with Python $(PYTHON_VERSION)..."; \
+			$(UV) venv -p $(PYTHON_VERSION) $(VENV_DIR); \
+		fi; \
+		echo "Installing dependencies into $(VENV_DIR)..."; \
+	fi
+	@$(UV) pip install --prerelease=allow "azure-cli>=2.65.0" $(PIP_INSTALL_SUFFIX)
+	@$(UV) pip install -e ".[all]" $(PIP_INSTALL_SUFFIX)
+	@$(UV) pip install -r requirements-dev.txt $(PIP_INSTALL_SUFFIX)
 	@echo "✅ Installation complete!"
 
 dev: install ## Install in development mode (alias for install)
 
-clean: ## Remove virtual environment and cache files
+clean: ## Remove local virtual environment and cache files
 	@echo "🧹 Cleaning up..."
-	rm -rf $(VENV_DIR)
+	rm -rf .venv
 	rm -rf .pytest_cache
 	rm -rf __pycache__
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
