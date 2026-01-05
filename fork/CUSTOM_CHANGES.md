@@ -147,6 +147,10 @@ if not credentials_available:
 
 **Description:** Add a Vector sidecar to SkyServe controller pods to ship SkyServe/service/replica logs to CloudWatch with per-service log groups and stable stream names per component.
 
+**Vector Image:**
+- Default: `timberio/vector:0.52.0-alpine`
+- Override: `serve.controller.log_shipper.vector_image` (or `SKYPILOT_SERVE_LOG_SHIPPER_VECTOR_IMAGE` on the machine generating the Kubernetes YAML)
+
 **Commits:**
 - `cac7fbc57` - feat(k8s/logs): ship SkyServe logs with Vector sidecar
 - `ac36268ec` - feat(k8s): support multi-container (sidecar) SkyPilot pods by selecting ray-node as primary
@@ -172,7 +176,7 @@ if not credentials_available:
   - Ensure rsync uses `kubectl exec -c` (default `ray-node`, override with `SKYPILOT_K8S_EXEC_CONTAINER`)
 
 **Environment Variables:**
-- `SKYPILOT_CW_LOG_GROUP_BASE` - CloudWatch log group prefix (default: `logs.aws.log_group_name` from `~/.sky/config.yaml`, else `/skypilot/serve`)
+- `SKYPILOT_CW_LOG_GROUP_BASE` - CloudWatch log group prefix (default: `/skypilot/serve`)
 - `SKYPILOT_CW_STREAM_PREFIX` - CloudWatch stream prefix (default: `logs.aws.log_stream_prefix` from `~/.sky/config.yaml`, else `skypilot-serve-`)
 - `AWS_REGION` / `AWS_DEFAULT_REGION` - required (best-effort default from `logs.aws.region` in `~/.sky/config.yaml`)
 - `SKYPILOT_K8S_EXEC_CONTAINER` - container name for `kubectl exec`/rsync (default: `ray-node`)
@@ -180,8 +184,8 @@ if not credentials_available:
 **CloudWatch Layout:**
 - Per-service groups: `${SKYPILOT_CW_LOG_GROUP_BASE}/<skyserve_service_dir>`
   - Streams: `${SKYPILOT_CW_STREAM_PREFIX}controller`, `${SKYPILOT_CW_STREAM_PREFIX}load_balancer`, `${SKYPILOT_CW_STREAM_PREFIX}replicas` (combined)
-- Controller-only group: `${SKYPILOT_CW_LOG_GROUP_BASE}/_controller`
-  - Streams: `${SKYPILOT_CW_STREAM_PREFIX}provision`, `${SKYPILOT_CW_STREAM_PREFIX}jobs`
+- Controller group: `${SKYPILOT_CW_LOG_GROUP_BASE}/controller`
+  - Streams: `${SKYPILOT_CW_STREAM_PREFIX}provision`, `${SKYPILOT_CW_STREAM_PREFIX}jobs`, `${SKYPILOT_CW_STREAM_PREFIX}misc`
 
 **Merge Strategy:**
 - Expect conflicts on upgrades (template file): re-apply the sidecar block and keep the Jinja `{% raw %}` wrappers around Vector template strings.

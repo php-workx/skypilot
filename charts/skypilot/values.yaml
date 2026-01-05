@@ -160,6 +160,33 @@ apiService:
   # @schema type: [array, null]; item: object
   extraVolumes: null
 
+  # External telemetry/export settings for the API server.
+  # This section is intended to be extensible for future log/metric shipping.
+  observability:
+    vector:
+      # Enable the Vector sidecar for exporting API server logs.
+      enabled: false
+      # Vector image used for log shipping.
+      image: timberio/vector:0.52.0-alpine
+      # Optional extra environment variables for the Vector sidecar only.
+      # This does NOT inherit global.extraEnvs unless you explicitly repeat them here.
+      # Use this to set AWS_REGION / AWS_DEFAULT_REGION for CloudWatch.
+      # @schema type: [array, null]; item: object
+      extraEnvs: null
+      # Resource requests/limits for the Vector sidecar.
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+      # Vector sinks configuration.
+      sinks:
+        cloudwatchLogs:
+          # CloudWatch log group for API request/task logs (sky api logs <request_id>).
+          logGroupName: /skypilot/api-server/tasks
+
   # Extra volume mounts to mount to the API server. Example:
   # extraVolumeMounts:
   #   - name: my-volume
