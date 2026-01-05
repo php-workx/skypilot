@@ -4,10 +4,11 @@ import pytest
 
 from sky.serve import autoscalers
 from sky.serve import constants as serve_constants
-from sky.serve import service_spec
+from sky.serve.service_spec import AutoscalingMetricSpec
+from sky.serve.service_spec import SkyServiceSpec
 
 
-def _build_metric_spec(**overrides) -> service_spec.AutoscalingMetricSpec:
+def _build_metric_spec(**overrides) -> AutoscalingMetricSpec:
     data = {
         'name': 'concurrent_users',
         'target_per_replica': 5,
@@ -17,11 +18,11 @@ def _build_metric_spec(**overrides) -> service_spec.AutoscalingMetricSpec:
         'stale_after_seconds': 180,
     }
     data.update(overrides)
-    return service_spec.AutoscalingMetricSpec(**data)
+    return AutoscalingMetricSpec(**data)
 
 
-def _build_service_spec(metric_spec: service_spec.AutoscalingMetricSpec,
-                        **overrides) -> service_spec.SkyServiceSpec:
+def _build_service_spec(metric_spec: AutoscalingMetricSpec,
+                        **overrides) -> SkyServiceSpec:
     data = {
         'readiness_path': '/',
         'initial_delay_seconds': serve_constants.DEFAULT_INITIAL_DELAY_SECONDS,
@@ -32,7 +33,7 @@ def _build_service_spec(metric_spec: service_spec.AutoscalingMetricSpec,
         'autoscaling_metric': metric_spec,
     }
     data.update(overrides)
-    return service_spec.SkyServiceSpec(**data)
+    return SkyServiceSpec(**data)
 
 
 def test_service_spec_autoscaling_metric_roundtrip():
@@ -51,7 +52,7 @@ def test_service_spec_autoscaling_metric_roundtrip():
             },
         },
     }
-    spec = service_spec.SkyServiceSpec.from_yaml_config(config)
+    spec = SkyServiceSpec.from_yaml_config(config)
     assert spec.autoscaling_metric is not None
     assert spec.autoscaling_metric.kind == 'gauge'
     assert spec.autoscaling_metric.aggregation == 'max'
@@ -78,7 +79,7 @@ def test_service_spec_autoscaling_metric_conflicts_with_qps():
         },
     }
     with pytest.raises(ValueError):
-        service_spec.SkyServiceSpec.from_yaml_config(config)
+        SkyServiceSpec.from_yaml_config(config)
 
 
 def test_external_metric_autoscaler_gauge_max():
@@ -118,6 +119,8 @@ def test_external_metric_autoscaler_stale_metric():
 
 
 def test_external_metric_autoscaler_rate():
+    # The autoscaler should sum all metric values collected within the window_seconds
+    # and then divides by that window duration.
     metric_spec = _build_metric_spec(name='interactions',
                                      kind='rate',
                                      target_per_replica=2,
@@ -129,7 +132,12 @@ def test_external_metric_autoscaler_rate():
     autoscaler.collect_external_metrics([
         {
             'name': 'interactions',
-            'value': 25,
+            'value': 67,
+            'timestamp': now - 15,
+        },
+        {
+            'name': 'interactions',
+            'value': 43,
             'timestamp': now - 5,
         },
         {
@@ -138,6 +146,77 @@ def test_external_metric_autoscaler_rate():
             'timestamp': now - 1,
         },
     ])
+    # (43 + 15) / 10 = 5.8 interactions per second
+    # required number of replicas is ceil(5.8 / 2) = 3
+    assert autoscaler._calculate_target_num_replicas() == 3
+
+
+def test_external_metric_autoscaler_out_of_order():
+    # Test that out-of-order metrics are handled correctly.
+    metric_spec = _build_metric_spec(name='interactions',
+                                     kind='rate',
+                                     target_per_replica=3,
+                                     window_seconds=10)
+    spec = _build_service_spec(metric_spec)
+    autoscaler = autoscalers.Autoscaler.from_spec('svc', spec)
+
+    now = time.time()
+    autoscaler.collect_external_metrics([
+        {
+            'name': 'interactions',
+            'value': 15,
+            'timestamp': now - 1,
+        },
+        {
+            'name': 'interactions',
+            'value': 67,
+            'timestamp': now - 15,
+        },
+        {
+            'name': 'interactions',
+            'value': 43,
+            'timestamp': now - 5,
+        },
+    ])
+    # (43 + 15) / 10 = 5.8 interactions per second
+    # required number of replicas is ceil(5.8 / 3) = 2
+    assert autoscaler._calculate_target_num_replicas() == 2
+
+
+def test_external_metric_autoscaler_pruning_multiple():
+    # Test that multiple old metrics are pruned correctly.
+    metric_spec = _build_metric_spec(name='interactions',
+                                     kind='rate',
+                                     target_per_replica=5,
+                                     window_seconds=10)
+    spec = _build_service_spec(metric_spec)
+    autoscaler = autoscalers.Autoscaler.from_spec('svc', spec)
+
+    now = time.time()
+    autoscaler.collect_external_metrics([
+        {
+            'name': 'interactions',
+            'value': 40,
+            'timestamp': now - 8,
+        },
+        {
+            'name': 'interactions',
+            'value': 100,
+            'timestamp': now - 20,
+        },
+        {
+            'name': 'interactions',
+            'value': 110,
+            'timestamp': now - 15,
+        },
+        {
+            'name': 'interactions',
+            'value': 50,
+            'timestamp': now - 2,
+        },
+    ])
+    # (40 + 50) / 10 = 9 interactions per second
+    # required number of replicas is ceil(9 / 5) = 2
     assert autoscaler._calculate_target_num_replicas() == 2
 
 

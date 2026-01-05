@@ -1,13 +1,12 @@
 """Autoscalers: perform autoscaling by monitoring metrics."""
 import bisect
-from collections import deque
 import copy
 import dataclasses
 import enum
 import math
 import time
 import typing
-from typing import Any, Deque, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from sky import sky_logging
 from sky.serve import constants
@@ -115,20 +114,26 @@ def _select_nonterminal_replicas_to_scale_down(
 
 
 class MetricWindow:
-    """Rolling window of metric samples."""
+    """Rolling window of metric samples, kept sorted by timestamp."""
 
     def __init__(self, window_seconds: int) -> None:
         self.window_seconds = window_seconds
-        self.samples: Deque[Tuple[float, float]] = deque()
+        # Use a list to allow sorted insertion. A deque is not suitable here.
+        self.samples: List[Tuple[float, float]] = []
 
     def add_sample(self, timestamp: float, value: float) -> None:
-        self.samples.append((timestamp, value))
-        self.prune(timestamp)
+        # Insert the new sample while maintaining chronological order.
+        # bisect.insort is efficient for this.
+        bisect.insort(self.samples, (timestamp, value))
+        # Pruning is now guaranteed to work correctly.
+        self.prune(self.samples[-1][0])
 
     def prune(self, now: float) -> None:
         cutoff = now - self.window_seconds
-        while self.samples and self.samples[0][0] < cutoff:
-            self.samples.popleft()
+        # Find the first sample that is NOT older than the cutoff.
+        start_index = bisect.bisect_left(self.samples, (cutoff, -float('inf')))
+        # And discard all samples before it.
+        self.samples = self.samples[start_index:]
 
     def values(self) -> List[float]:
         return [value for _, value in self.samples]
@@ -145,7 +150,7 @@ class MetricWindow:
         return list(self.samples)
 
     def load_list(self, samples: List[Tuple[float, float]]) -> None:
-        self.samples = deque(samples)
+        self.samples = sorted(samples)
 
 
 class Autoscaler:
