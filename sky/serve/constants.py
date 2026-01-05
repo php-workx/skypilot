@@ -52,6 +52,9 @@ AUTOSCALER_CUSTOM_METRIC_WINDOW_SECONDS = 60
 AUTOSCALER_CUSTOM_METRIC_STALE_AFTER_SECONDS = 180
 AUTOSCALER_CUSTOM_METRIC_DEFAULT_KIND = 'gauge'
 AUTOSCALER_CUSTOM_METRIC_DEFAULT_AGGREGATION = 'avg'
+# Time-to-live for a metric source. If a source has not reported any metrics
+# for this duration, it will be considered stale and removed.
+AUTOSCALER_SOURCE_TTL_SECONDS = 600
 # Autoscaler scale decision interval in seconds.
 # We will try to scale up/down every `decision_interval`.
 AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS = 20

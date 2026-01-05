@@ -16,7 +16,7 @@ from sky.utils import ux_utils
 from sky.utils import yaml_utils
 
 _CUSTOM_METRIC_KINDS = {'gauge', 'rate'}
-_CUSTOM_METRIC_GAUGE_AGGREGATIONS = {'avg', 'max', 'last'}
+_CUSTOM_METRIC_GAUGE_AGGREGATIONS = {'avg', 'max', 'min', 'sum'}
 
 
 @dataclasses.dataclass(frozen=True)

@@ -19,6 +19,8 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
+DEFAULT_SOURCE_ID = 'default'
+
 
 class AutoscalerDecisionOperator(enum.Enum):
     SCALE_UP = 'scale_up'
@@ -114,43 +116,91 @@ def _select_nonterminal_replicas_to_scale_down(
 
 
 class MetricWindow:
-    """Rolling window of metric samples, kept sorted by timestamp."""
+    """A source-aware, rolling window of metric samples."""
 
-    def __init__(self, window_seconds: int) -> None:
+    def __init__(self, window_seconds: int, source_ttl_seconds: int) -> None:
         self.window_seconds = window_seconds
-        # Use a list to allow sorted insertion. A deque is not suitable here.
-        self.samples: List[Tuple[float, float]] = []
+        self.source_ttl_seconds = source_ttl_seconds
+        # {source_id: [(timestamp, value), ...]}
+        self.samples: Dict[str, List[Tuple[float, float]]] = {}
+        # {source_id: last_updated_at}
+        self.last_updated_at: Dict[str, float] = {}
 
-    def add_sample(self, timestamp: float, value: float) -> None:
-        # Insert the new sample while maintaining chronological order.
-        # bisect.insort is efficient for this.
-        bisect.insort(self.samples, (timestamp, value))
-        # Pruning is now guaranteed to work correctly.
-        self.prune(self.samples[-1][0])
+    def add_sample(self, source_id: str, timestamp: float,
+                   value: float) -> None:
+        now = time.time()
+        if source_id not in self.samples:
+            self.samples[source_id] = []
+        bisect.insort(self.samples[source_id], (timestamp, value))
+        self.last_updated_at[source_id] = now
+        self.prune(now)
 
-    def prune(self, now: float) -> None:
-        cutoff = now - self.window_seconds
-        # Find the first sample that is NOT older than the cutoff.
-        start_index = bisect.bisect_left(self.samples, (cutoff, -float('inf')))
-        # And discard all samples before it.
-        self.samples = self.samples[start_index:]
+    def prune(self, now: float, sample_now: Optional[float] = None) -> None:
+        # Prune stale sources
+        stale_sources = [
+            source_id for source_id, last_seen in self.last_updated_at.items()
+            if now - last_seen > self.source_ttl_seconds
+        ]
+        for source_id in stale_sources:
+            del self.samples[source_id]
+            del self.last_updated_at[source_id]
 
-    def values(self) -> List[float]:
-        return [value for _, value in self.samples]
+        # Prune old samples within each source's window.
+        if sample_now is None:
+            sample_now = self.last_timestamp()
+            if sample_now is None:
+                sample_now = now
+        cutoff = sample_now - self.window_seconds
+        for source_id in list(self.samples.keys()):
+            source_samples = self.samples[source_id]
+            start_index = bisect.bisect_left(source_samples,
+                                             (cutoff, -float('inf')))
+            self.samples[source_id] = source_samples[start_index:]
+            if not self.samples[source_id]:
+                # Clean up source if no samples are left
+                del self.samples[source_id]
+                del self.last_updated_at[source_id]
+
+    def active_sources(self) -> List[str]:
+        return list(self.samples.keys())
+
+    def get_latest_value(self, source_id: str) -> Optional[float]:
+        if source_id not in self.samples or not self.samples[source_id]:
+            return None
+        return self.samples[source_id][-1][1]
+
+    def get_samples(self, source_id: str) -> List[Tuple[float, float]]:
+        return self.samples.get(source_id, [])
 
     def last_timestamp(self) -> Optional[float]:
         if not self.samples:
             return None
-        return self.samples[-1][0]
+        max_ts = -1.0
+        for source_samples in self.samples.values():
+            if source_samples:
+                max_ts = max(max_ts, source_samples[-1][0])
+        return max_ts if max_ts != -1.0 else None
 
     def clear(self) -> None:
         self.samples.clear()
+        self.last_updated_at.clear()
 
-    def to_list(self) -> List[Tuple[float, float]]:
-        return list(self.samples)
+    def to_list(self) -> List[Dict[str, Any]]:
+        return [{
+            'source_id': source_id,
+            'samples': samples
+        } for source_id, samples in self.samples.items()]
 
-    def load_list(self, samples: List[Tuple[float, float]]) -> None:
-        self.samples = sorted(samples)
+    def load_list(self, data: List[Dict[str, Any]]) -> None:
+        self.clear()
+        now = time.time()
+        for source_data in data:
+            source_id = source_data['source_id']
+            samples = sorted(source_data['samples'])
+            self.samples[source_id] = samples
+            if samples:
+                self.last_updated_at[source_id] = now
+        self.prune(now)
 
 
 class Autoscaler:
@@ -509,28 +559,54 @@ class ExternalMetricAutoscaler(_AutoscalerWithHysteresis):
         super().__init__(service_name, spec)
         assert spec.autoscaling_metric is not None
         self.metric_spec = spec.autoscaling_metric
-        self._metric_window = MetricWindow(self.metric_spec.window_seconds)
+        self._metric_window = MetricWindow(
+            self.metric_spec.window_seconds,
+            constants.AUTOSCALER_SOURCE_TTL_SECONDS)
         self._last_metric_value: float = 0.0
 
     def _calculate_metric_value(self) -> float:
         now = time.time()
         self._metric_window.prune(now)
-        values = self._metric_window.values()
-        if not values:
+        active_sources = self._metric_window.active_sources()
+        if not active_sources:
             return 0.0
+
         if self.metric_spec.kind == 'rate':
-            return sum(values) / self.metric_spec.window_seconds
-        if self.metric_spec.aggregation == 'max':
-            return max(values)
-        if self.metric_spec.aggregation == 'last':
-            return values[-1]
-        return sum(values) / len(values)
+            total_value = 0.0
+            for source_id in active_sources:
+                samples = self._metric_window.get_samples(source_id)
+                if len(samples) >= 2:
+                    first_timestamp, first_value = samples[0]
+                    last_timestamp, last_value = samples[-1]
+                    time_delta = last_timestamp - first_timestamp
+                    if time_delta > 0:
+                        total_value += (last_value - first_value) / time_delta
+            return total_value
+
+        # Gauge metrics
+        latest_values = [
+            self._metric_window.get_latest_value(s) for s in active_sources
+        ]
+        latest_values = [v for v in latest_values if v is not None]
+        if not latest_values:
+            return 0.0
+
+        aggregation = self.metric_spec.aggregation
+        if aggregation == 'sum':
+            return sum(latest_values)
+        if aggregation == 'avg':
+            return sum(latest_values) / len(latest_values)
+        if aggregation == 'max':
+            return max(latest_values)
+        if aggregation == 'min':
+            return min(latest_values)
+        # Should be unreachable due to validation in SkyServiceSpec.
+        return 0.0
 
     def _calculate_target_num_replicas(self) -> int:
         now = time.time()
         last_timestamp = self._metric_window.last_timestamp()
         if last_timestamp is None:
-            # No metrics yet, do nothing.
             return self.target_num_replicas
         if (self.metric_spec.stale_after_seconds is not None and
                 now - last_timestamp > self.metric_spec.stale_after_seconds):
@@ -564,7 +640,8 @@ class ExternalMetricAutoscaler(_AutoscalerWithHysteresis):
                 spec.autoscaling_metric.window_seconds !=
                 self.metric_spec.window_seconds):
             self._metric_window = MetricWindow(
-                spec.autoscaling_metric.window_seconds)
+                spec.autoscaling_metric.window_seconds,
+                constants.AUTOSCALER_SOURCE_TTL_SECONDS)
         self.metric_spec = spec.autoscaling_metric
 
     def collect_request_information(
@@ -585,14 +662,19 @@ class ExternalMetricAutoscaler(_AutoscalerWithHysteresis):
                 logger.warning('Ignoring metric %s with non-numeric value: %s',
                                name, value)
                 continue
+            source_id = sample.get('source_id', sample.get('proxy_id'))
+            if source_id is None:
+                source_id = DEFAULT_SOURCE_ID
             timestamp = sample.get('timestamp', now)
             if not isinstance(timestamp, (int, float)):
                 timestamp = now
             if timestamp > now:
                 timestamp = now
-            self._metric_window.add_sample(float(timestamp), float(value))
+            self._metric_window.add_sample(str(source_id), float(timestamp),
+                                           float(value))
         logger.info('External metric %s samples in window: %s',
-                    self.metric_spec.name, len(self._metric_window.samples))
+                    self.metric_spec.name,
+                    sum(len(s) for s in self._metric_window.samples.values()))
 
     def _generate_scaling_decisions(
         self,
