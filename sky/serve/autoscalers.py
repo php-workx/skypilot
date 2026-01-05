@@ -515,18 +515,6 @@ class ExternalMetricAutoscaler(_AutoscalerWithHysteresis):
     def _calculate_metric_value(self) -> float:
         now = time.time()
         self._metric_window.prune(now)
-        last_timestamp = self._metric_window.last_timestamp()
-        if last_timestamp is None:
-            return 0.0
-        if (self.metric_spec.stale_after_seconds is not None and
-                now - last_timestamp > self.metric_spec.stale_after_seconds):
-            logger.info(
-                'External metric is stale (last=%s, stale_after=%s); '
-                'treating value as 0.',
-                last_timestamp,
-                self.metric_spec.stale_after_seconds,
-            )
-            return 0.0
         values = self._metric_window.values()
         if not values:
             return 0.0
@@ -539,6 +527,21 @@ class ExternalMetricAutoscaler(_AutoscalerWithHysteresis):
         return sum(values) / len(values)
 
     def _calculate_target_num_replicas(self) -> int:
+        now = time.time()
+        last_timestamp = self._metric_window.last_timestamp()
+        if last_timestamp is None:
+            # No metrics yet, do nothing.
+            return self.target_num_replicas
+        if (self.metric_spec.stale_after_seconds is not None and
+                now - last_timestamp > self.metric_spec.stale_after_seconds):
+            logger.warning(
+                'External metric is stale (last seen %s seconds ago). '
+                'Keeping current number of replicas: %s.',
+                int(now - last_timestamp),
+                self.target_num_replicas,
+            )
+            return self.target_num_replicas
+
         metric_value = self._calculate_metric_value()
         self._last_metric_value = metric_value
         target_num_replicas = math.ceil(metric_value /
