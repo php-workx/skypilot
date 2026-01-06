@@ -67,7 +67,7 @@ dev: install ## Install in development mode (alias for install)
 
 clean: ## Remove local virtual environment and cache files
 	@echo "🧹 Cleaning up..."
-	rm -rf .venv  # Only remove local .venv, not conda environments
+	rm -rf .venv
 	rm -rf .pytest_cache
 	rm -rf __pycache__
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

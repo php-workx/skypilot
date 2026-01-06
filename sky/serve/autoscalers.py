@@ -19,8 +19,6 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-DEFAULT_SOURCE_ID = 'default'
-
 
 class AutoscalerDecisionOperator(enum.Enum):
     SCALE_UP = 'scale_up'
@@ -664,7 +662,7 @@ class ExternalMetricAutoscaler(_AutoscalerWithHysteresis):
                 continue
             source_id = sample.get('source_id', sample.get('proxy_id'))
             if source_id is None:
-                source_id = DEFAULT_SOURCE_ID
+                source_id = constants.AUTOSCALER_DEFAULT_SOURCE_ID
             timestamp = sample.get('timestamp', now)
             if not isinstance(timestamp, (int, float)):
                 timestamp = now

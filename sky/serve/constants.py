@@ -52,6 +52,8 @@ AUTOSCALER_CUSTOM_METRIC_WINDOW_SECONDS = 60
 AUTOSCALER_CUSTOM_METRIC_STALE_AFTER_SECONDS = 180
 AUTOSCALER_CUSTOM_METRIC_DEFAULT_KIND = 'gauge'
 AUTOSCALER_CUSTOM_METRIC_DEFAULT_AGGREGATION = 'avg'
+# Default source ID for custom metrics when not provided.
+AUTOSCALER_DEFAULT_SOURCE_ID = 'default'
 # Time-to-live for a metric source. If a source has not reported any metrics
 # for this duration, it will be considered stale and removed.
 AUTOSCALER_SOURCE_TTL_SECONDS = 600
