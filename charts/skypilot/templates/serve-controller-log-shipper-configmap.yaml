@@ -1,0 +1,123 @@
+{{- $cfg := .Values.serveController.logShipper.vector.configMap -}}
+{{- $name := (default "skypilot-serve-log-shipper-vector" $cfg.name) -}}
+{{- if and $cfg.create (not (lookup "v1" "ConfigMap" .Release.Namespace $name)) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    # Keep this ConfigMap across upgrades/uninstalls so operators can edit it
+    # without a Helm chart release.
+    "helm.sh/resource-policy": keep
+data:
+  vector.yaml: |
+    data_dir: ${VECTOR_DATA_DIR}
+
+    sources:
+      skypilot_logs:
+        type: file
+        include:
+          - /home/sky/.sky/serve/*/*.log
+          - /home/sky/sky_logs/*/*.log
+          - /home/sky/sky_logs/*/*/*.log
+          - /home/sky/sky_logs/*/*/*/*.log
+          - /home/sky/.sky/*.log
+        read_from: beginning
+
+    transforms:
+      enrich:
+        type: remap
+        inputs:
+          - skypilot_logs
+        source: |
+          .controller = get_env_var("SKYPILOT_SERVICE") ?? "unknown"
+          .component = "unknown"
+          .source_path = string!(.file)
+          .skyserve_service = null
+          .skyserve_service_dir = null
+
+          if is_string(.source_path) {
+            svc = parse_regex(.source_path, r'/(?:home/sky|root)/\\.sky/serve/(?P<svc_dir>[^/]+)/') ?? null
+            if svc != null {
+              .skyserve_service_dir = svc.svc_dir
+              .skyserve_service = svc.svc_dir
+            } else {
+              svc2 = parse_regex(.source_path, r'/replica_jobs/(?P<cluster_id>[^/]+)/(?P<replica_id>[^-]+)-(?P<svc>[^/]+)/') ?? null
+              if svc2 != null {
+                svc_name = svc2.svc
+                if svc_name != null {
+                  .skyserve_service = svc_name
+                  .skyserve_service_dir = replace!(svc_name, "-", "_")
+                }
+              }
+            }
+
+            if ends_with(.source_path, "/controller.log") {
+              .component = "controller"
+            } else if ends_with(.source_path, "/load_balancer.log") {
+              .component = "load_balancer"
+            } else if ends_with(.source_path, "/provision.log") {
+              .component = "provision"
+            } else if contains(.source_path, "/sky_logs/jobs_controller/") {
+              .component = "jobs"
+            } else {
+              launch = parse_regex(.source_path, r'/replica_(?P<replica_id>[^_/]+)_launch\\.log$') ?? null
+              if launch != null {
+                .component = "replica_launch"
+                .replica_id = launch.replica_id
+              }
+
+              run = parse_regex(.source_path, r'/replica_jobs/(?P<cluster_id>[^/]+)/(?P<replica_id>[^-]+)-(?P<svc>[^/]+)/run\\.log$') ?? null
+              if run != null {
+                .component = "replica_run"
+                .replica_id = run.replica_id
+                .replica_cluster_id = run.cluster_id
+              }
+            }
+          }
+
+          # CloudWatch routing:
+          # - Per-service groups: "${SKYPILOT_CW_LOG_GROUP_BASE}/<skyserve_service>".
+          # - Controller group: "${SKYPILOT_CW_LOG_GROUP_BASE}/controller".
+          # - Stable streams per component, with optional prefix: "${SKYPILOT_CW_STREAM_PREFIX}<stream>".
+          group_base = get_env_var("SKYPILOT_CW_LOG_GROUP_BASE") ?? "/skypilot/serve"
+          stream_prefix = get_env_var("SKYPILOT_CW_STREAM_PREFIX") ?? ""
+          svc_group = .skyserve_service_dir
+          if svc_group == null {
+            svc_group = "controller"
+          }
+          .cw_group = group_base + "/" + svc_group
+
+          stream_base = "misc"
+          if .component == "controller" {
+            stream_base = "controller"
+          } else if .component == "load_balancer" {
+            stream_base = "load_balancer"
+          } else if .component == "provision" {
+            stream_base = "provision"
+          } else if .component == "jobs" {
+            stream_base = "jobs"
+          } else if .component == "replica_launch" || .component == "replica_run" {
+            stream_base = "replicas"
+          }
+          .cw_stream = stream_prefix + stream_base
+
+          # Backward-compat for queries.
+          if .skyserve_service == null {
+            .service = .controller
+          } else {
+            .service = .skyserve_service
+          }
+
+    sinks:
+      cloudwatch:
+        type: aws_cloudwatch_logs
+        inputs:
+          - enrich
+        region: ${AWS_REGION}
+        group_name: {{ "{{ cw_group }}" | quote }}
+        stream_name: {{ "{{ cw_stream }}" | quote }}
+        encoding:
+          codec: json
+{{- end -}}

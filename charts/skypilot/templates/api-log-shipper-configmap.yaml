@@ -1,0 +1,41 @@
+{{- $vector := .Values.apiService.observability.vector -}}
+{{- if and $vector.enabled (not $vector.configMapName) -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-api-log-shipper-vector
+  namespace: {{ .Release.Namespace }}
+data:
+  vector.yaml: |
+    data_dir: ${VECTOR_DATA_DIR}/${POD_NAME}
+
+    sources:
+      api_request_logs:
+        type: file
+        include:
+          - /root/sky_logs/api_server/requests/*.log
+        exclude:
+          - /root/sky_logs/api_server/requests/skypilot-status-refresh-daemon.log
+          - /root/sky_logs/api_server/requests/skypilot-volume-status-refresh-daemon.log
+        read_from: beginning
+
+    transforms:
+      enrich:
+        type: remap
+        inputs: [api_request_logs]
+        source: |
+          .source_path = string!(.file)
+          req = parse_regex(.source_path, r'/requests/(?P<request_id>[^/]+)\\.log$') ?? null
+          if req != null { .request_id = req.request_id }
+          .pod_name = get_env_var("POD_NAME") ?? "unknown"
+
+    sinks:
+      cloudwatch:
+        type: aws_cloudwatch_logs
+        inputs: [enrich]
+        region: ${AWS_REGION}
+        group_name: ${SKYPILOT_API_TASK_LOG_GROUP}
+        stream_name: ${POD_NAME}
+        encoding:
+          codec: json
+{{- end -}}

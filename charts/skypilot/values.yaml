@@ -168,6 +168,11 @@ apiService:
       enabled: false
       # Vector image used for log shipping.
       image: timberio/vector:0.52.0-alpine
+      # Optional: use an existing ConfigMap (in the same namespace) that contains
+      # the Vector config under the key 'vector.yaml'. If empty, the chart will
+      # create and manage a ConfigMap.
+      # @schema type: [string, null]
+      configMapName: null
       # Optional extra environment variables for the Vector sidecar only.
       # This does NOT inherit global.extraEnvs unless you explicitly repeat them here.
       # Use this to set AWS_REGION / AWS_DEFAULT_REGION for CloudWatch.
@@ -366,6 +371,20 @@ ingress:
   # TLS settings to enable https ingress
   tls:
     enabled: false
+
+# Optional ConfigMap for overriding the SkyServe controller Vector sidecar config.
+# This ConfigMap is consumed by SkyPilot's dynamically-created SkyServe controller pods
+# (if the SkyPilot template is configured to mount it).
+serveController:
+  logShipper:
+    vector:
+      configMap:
+        # If true, create the ConfigMap once (and keep it) so operators can edit it
+        # without needing chart releases. If the ConfigMap already exists, the chart
+        # will not recreate it.
+        create: false
+        # Name of the ConfigMap. SkyPilot defaults to 'skypilot-serve-log-shipper-vector'.
+        name: skypilot-serve-log-shipper-vector
 
 ingress-nginx:
   enabled: true
