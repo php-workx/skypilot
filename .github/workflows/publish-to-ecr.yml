@@ -21,6 +21,7 @@ on:
 env:
   AWS_REGION: eu-central-1
   SKYPILOT_BASE_VERSION: '0.11.1'
+  SKYPILOT_GIT_URL: 'git+https://github.com/php-workx/skypilot.git@ojin-release'
   # ECR_REGISTRY will be set dynamically from AWS account
 
 jobs:
@@ -152,6 +153,8 @@ jobs:
           INSTALL_FROM_SOURCE=true
           NEXT_BASE_PATH=/dashboard"
           fi
+          ARGS="${ARGS}
+          SKYPILOT_GIT_URL=${SKYPILOT_GIT_URL}"
           echo "args<<EOF" >> $GITHUB_OUTPUT
           echo "${ARGS}" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT

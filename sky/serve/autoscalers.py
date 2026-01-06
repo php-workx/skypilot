@@ -113,6 +113,94 @@ def _select_nonterminal_replicas_to_scale_down(
     return [info.replica_id for info in replicas][:num_replica_to_scale_down]
 
 
+class MetricWindow:
+    """A source-aware, rolling window of metric samples."""
+
+    def __init__(self, window_seconds: int, source_ttl_seconds: int) -> None:
+        self.window_seconds = window_seconds
+        self.source_ttl_seconds = source_ttl_seconds
+        # {source_id: [(timestamp, value), ...]}
+        self.samples: Dict[str, List[Tuple[float, float]]] = {}
+        # {source_id: last_updated_at}
+        self.last_updated_at: Dict[str, float] = {}
+
+    def add_sample(self, source_id: str, timestamp: float,
+                   value: float) -> None:
+        now = time.time()
+        if source_id not in self.samples:
+            self.samples[source_id] = []
+        bisect.insort(self.samples[source_id], (timestamp, value))
+        self.last_updated_at[source_id] = now
+        self.prune(now)
+
+    def prune(self, now: float, sample_now: Optional[float] = None) -> None:
+        # Prune stale sources
+        stale_sources = [
+            source_id for source_id, last_seen in self.last_updated_at.items()
+            if now - last_seen > self.source_ttl_seconds
+        ]
+        for source_id in stale_sources:
+            del self.samples[source_id]
+            del self.last_updated_at[source_id]
+
+        # Prune old samples within each source's window.
+        if sample_now is None:
+            sample_now = self.last_timestamp()
+            if sample_now is None:
+                sample_now = now
+        cutoff = sample_now - self.window_seconds
+        for source_id in list(self.samples.keys()):
+            source_samples = self.samples[source_id]
+            start_index = bisect.bisect_left(source_samples,
+                                             (cutoff, -float('inf')))
+            self.samples[source_id] = source_samples[start_index:]
+            if not self.samples[source_id]:
+                # Clean up source if no samples are left
+                del self.samples[source_id]
+                del self.last_updated_at[source_id]
+
+    def active_sources(self) -> List[str]:
+        return list(self.samples.keys())
+
+    def get_latest_value(self, source_id: str) -> Optional[float]:
+        if source_id not in self.samples or not self.samples[source_id]:
+            return None
+        return self.samples[source_id][-1][1]
+
+    def get_samples(self, source_id: str) -> List[Tuple[float, float]]:
+        return self.samples.get(source_id, [])
+
+    def last_timestamp(self) -> Optional[float]:
+        if not self.samples:
+            return None
+        max_ts = -1.0
+        for source_samples in self.samples.values():
+            if source_samples:
+                max_ts = max(max_ts, source_samples[-1][0])
+        return max_ts if max_ts != -1.0 else None
+
+    def clear(self) -> None:
+        self.samples.clear()
+        self.last_updated_at.clear()
+
+    def to_list(self) -> List[Dict[str, Any]]:
+        return [{
+            'source_id': source_id,
+            'samples': samples
+        } for source_id, samples in self.samples.items()]
+
+    def load_list(self, data: List[Dict[str, Any]]) -> None:
+        self.clear()
+        now = time.time()
+        for source_data in data:
+            source_id = source_data['source_id']
+            samples = sorted(source_data['samples'])
+            self.samples[source_id] = samples
+            if samples:
+                self.last_updated_at[source_id] = now
+        self.prune(now)
+
+
 class Autoscaler:
     """Abstract class for autoscalers."""
 
@@ -175,6 +263,11 @@ class Autoscaler:
         """Collect request information from aggregator for autoscaling."""
         raise NotImplementedError
 
+    def collect_external_metrics(self, metric_samples: List[Dict[str,
+                                                                 Any]]) -> None:
+        """Collect external metrics for autoscaling."""
+        del metric_samples  # unused by default
+
     def info(self) -> Dict[str, Any]:
         """Get information about the autoscaler."""
         return {
@@ -211,6 +304,10 @@ class Autoscaler:
     def from_spec(cls, service_name: str,
                   spec: 'service_spec.SkyServiceSpec') -> 'Autoscaler':
         # TODO(MaoZiming): use NAME to get the class.
+        if spec.autoscaling_metric is not None:
+            if spec.use_ondemand_fallback:
+                return FallbackExternalMetricAutoscaler(service_name, spec)
+            return ExternalMetricAutoscaler(service_name, spec)
         if spec.use_ondemand_fallback:
             return FallbackRequestRateAutoscaler(service_name, spec)
         elif isinstance(spec.target_qps_per_replica, dict):
@@ -450,6 +547,200 @@ class _AutoscalerWithHysteresis(Autoscaler):
             f'{self.scale_up_threshold}. '
             f'Downscale counter: {self.downscale_counter}/'
             f'{self.scale_down_threshold}. ')
+
+
+class ExternalMetricAutoscaler(_AutoscalerWithHysteresis):
+    """Autoscale according to externally reported metrics."""
+
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
+        super().__init__(service_name, spec)
+        assert spec.autoscaling_metric is not None
+        self.metric_spec = spec.autoscaling_metric
+        self._metric_window = MetricWindow(
+            self.metric_spec.window_seconds,
+            constants.AUTOSCALER_SOURCE_TTL_SECONDS)
+        self._last_metric_value: float = 0.0
+
+    def _calculate_metric_value(self) -> float:
+        now = time.time()
+        self._metric_window.prune(now)
+        active_sources = self._metric_window.active_sources()
+        if not active_sources:
+            return 0.0
+
+        if self.metric_spec.kind == 'rate':
+            total_value = 0.0
+            for source_id in active_sources:
+                samples = self._metric_window.get_samples(source_id)
+                if len(samples) >= 2:
+                    first_timestamp, first_value = samples[0]
+                    last_timestamp, last_value = samples[-1]
+                    time_delta = last_timestamp - first_timestamp
+                    if time_delta > 0:
+                        total_value += (last_value - first_value) / time_delta
+            return total_value
+
+        # Gauge metrics
+        latest_values = [
+            self._metric_window.get_latest_value(s) for s in active_sources
+        ]
+        latest_values = [v for v in latest_values if v is not None]
+        if not latest_values:
+            return 0.0
+
+        aggregation = self.metric_spec.aggregation
+        if aggregation == 'sum':
+            return sum(latest_values)
+        if aggregation == 'avg':
+            return sum(latest_values) / len(latest_values)
+        if aggregation == 'max':
+            return max(latest_values)
+        if aggregation == 'min':
+            return min(latest_values)
+        # Should be unreachable due to validation in SkyServiceSpec.
+        return 0.0
+
+    def _calculate_target_num_replicas(self) -> int:
+        now = time.time()
+        last_timestamp = self._metric_window.last_timestamp()
+        if last_timestamp is None:
+            return self.target_num_replicas
+        if (self.metric_spec.stale_after_seconds is not None and
+                now - last_timestamp > self.metric_spec.stale_after_seconds):
+            logger.warning(
+                'External metric is stale (last seen %s seconds ago). '
+                'Keeping current number of replicas: %s.',
+                int(now - last_timestamp),
+                self.target_num_replicas,
+            )
+            return self.target_num_replicas
+
+        metric_value = self._calculate_metric_value()
+        self._last_metric_value = metric_value
+        target_num_replicas = math.ceil(metric_value /
+                                        self.metric_spec.target_per_replica)
+        logger.info(
+            'External metric %s=%s. Target number of replicas: %s.',
+            self.metric_spec.name,
+            metric_value,
+            target_num_replicas,
+        )
+        return self._clip_target_num_replicas(target_num_replicas)
+
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       update_mode: serve_utils.UpdateMode) -> None:
+        super().update_version(version, spec, update_mode)
+        if spec.autoscaling_metric is None:
+            self._metric_window.clear()
+            return
+        if (spec.autoscaling_metric.name != self.metric_spec.name or
+                spec.autoscaling_metric.window_seconds !=
+                self.metric_spec.window_seconds):
+            self._metric_window = MetricWindow(
+                spec.autoscaling_metric.window_seconds,
+                constants.AUTOSCALER_SOURCE_TTL_SECONDS)
+        self.metric_spec = spec.autoscaling_metric
+
+    def collect_request_information(
+            self, request_aggregator_info: Dict[str, Any]) -> None:
+        del request_aggregator_info  # unused for external metrics
+
+    def collect_external_metrics(self, metric_samples: List[Dict[str,
+                                                                 Any]]) -> None:
+        now = time.time()
+        for sample in metric_samples:
+            if not isinstance(sample, dict):
+                continue
+            name = sample.get('name')
+            if name != self.metric_spec.name:
+                continue
+            value = sample.get('value')
+            if not isinstance(value, (int, float)):
+                logger.warning('Ignoring metric %s with non-numeric value: %s',
+                               name, value)
+                continue
+            source_id = sample.get('source_id', sample.get('proxy_id'))
+            if source_id is None:
+                source_id = constants.AUTOSCALER_DEFAULT_SOURCE_ID
+            timestamp = sample.get('timestamp', now)
+            if not isinstance(timestamp, (int, float)):
+                timestamp = now
+            if timestamp > now:
+                timestamp = now
+            self._metric_window.add_sample(str(source_id), float(timestamp),
+                                           float(value))
+        logger.info('External metric %s samples in window: %s',
+                    self.metric_spec.name,
+                    sum(len(s) for s in self._metric_window.samples.values()))
+
+    def _generate_scaling_decisions(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> List[AutoscalerDecision]:
+        self._set_target_num_replicas_with_hysteresis()
+        latest_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
+
+        for info in replica_infos:
+            if info.version == self.latest_version:
+                if not info.is_terminal:
+                    latest_nonterminal_replicas.append(info)
+
+        scaling_decisions: List[AutoscalerDecision] = []
+        target_num_replicas = self.get_final_target_num_replicas()
+
+        if len(latest_nonterminal_replicas) < target_num_replicas:
+            num_replicas_to_scale_up = (target_num_replicas -
+                                        len(latest_nonterminal_replicas))
+            logger.info('Number of replicas to scale up: %s',
+                        num_replicas_to_scale_up)
+            scaling_decisions.extend(
+                _generate_scale_up_decisions(num_replicas_to_scale_up, None))
+
+        replicas_to_scale_down = []
+        if len(latest_nonterminal_replicas) > target_num_replicas:
+            num_replicas_to_scale_down = (len(latest_nonterminal_replicas) -
+                                          target_num_replicas)
+            replicas_to_scale_down = (
+                _select_nonterminal_replicas_to_scale_down(
+                    num_replicas_to_scale_down, latest_nonterminal_replicas))
+            logger.info('Number of replicas to scale down: %s %s',
+                        num_replicas_to_scale_down, replicas_to_scale_down)
+
+        scaling_decisions.extend(
+            _generate_scale_down_decisions(replicas_to_scale_down))
+
+        return scaling_decisions
+
+    def info(self) -> Dict[str, Any]:
+        info = super().info()
+        current_value = self._calculate_metric_value()
+        self._last_metric_value = current_value
+        info.update({
+            'autoscaling_metric_name': self.metric_spec.name,
+            'autoscaling_metric_kind': self.metric_spec.kind,
+            'autoscaling_metric_aggregation': self.metric_spec.aggregation,
+            'autoscaling_metric_window_seconds':
+                (self.metric_spec.window_seconds),
+            'autoscaling_metric_stale_after_seconds':
+                (self.metric_spec.stale_after_seconds),
+            'autoscaling_metric_last_timestamp':
+                (self._metric_window.last_timestamp()),
+            'autoscaling_metric_current_value': current_value,
+        })
+        return info
+
+    def _dump_dynamic_states(self) -> Dict[str, Any]:
+        return {
+            'external_metric_samples': self._metric_window.to_list(),
+        }
+
+    def _load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
+        if 'external_metric_samples' in dynamic_states:
+            self._metric_window.load_list(
+                dynamic_states.pop('external_metric_samples'))
+        if dynamic_states:
+            logger.info(f'Remaining dynamic states: {dynamic_states}')
 
 
 class RequestRateAutoscaler(_AutoscalerWithHysteresis):
@@ -1037,6 +1328,126 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
 
         # Make sure we don't launch on-demand fallback for
         # overprovisioned replicas.
+        num_ondemand_to_provision = min(num_ondemand_to_provision,
+                                        self.target_num_replicas)
+        if num_ondemand_to_provision > num_nonterminal_ondemand:
+            num_ondemand_to_scale_up = (num_ondemand_to_provision -
+                                        num_nonterminal_ondemand)
+            logger.info('Number of on-demand instances to scale up: '
+                        f'{num_ondemand_to_scale_up}')
+            scaling_decisions.extend(
+                _generate_scale_up_decisions(num_ondemand_to_scale_up,
+                                             self.ONDEMAND_OVERRIDE))
+        else:
+            num_ondemand_to_scale_down = (num_nonterminal_ondemand -
+                                          num_ondemand_to_provision)
+            replicas_to_scale_down = (
+                _select_nonterminal_replicas_to_scale_down(
+                    num_ondemand_to_scale_down,
+                    filter(lambda info: not info.is_spot,
+                           latest_nonterminal_replicas)))
+            logger.info(
+                'Number of on-demand instances to scale down: '
+                f'{num_ondemand_to_scale_down} {replicas_to_scale_down}')
+
+            all_replica_ids_to_scale_down.extend(replicas_to_scale_down)
+
+        scaling_decisions.extend(
+            _generate_scale_down_decisions(all_replica_ids_to_scale_down))
+
+        return scaling_decisions
+
+
+class FallbackExternalMetricAutoscaler(ExternalMetricAutoscaler):
+    """FallbackExternalMetricAutoscaler
+
+    Autoscale based on external metrics with on-demand fallback.
+    """
+
+    SPOT_OVERRIDE = {'use_spot': True}
+    ONDEMAND_OVERRIDE = {'use_spot': False}
+
+    def _setup_fallback_options(self,
+                                spec: 'service_spec.SkyServiceSpec') -> None:
+        self.base_ondemand_fallback_replicas: int = (
+            spec.base_ondemand_fallback_replicas
+            if spec.base_ondemand_fallback_replicas is not None else 0)
+        assert spec.use_ondemand_fallback
+        self.dynamic_ondemand_fallback: bool = (
+            spec.dynamic_ondemand_fallback
+            if spec.dynamic_ondemand_fallback is not None else False)
+
+    def __init__(self, service_name: str,
+                 spec: 'service_spec.SkyServiceSpec') -> None:
+        super().__init__(service_name, spec)
+        self._setup_fallback_options(spec)
+
+    def update_version(self, version: int, spec: 'service_spec.SkyServiceSpec',
+                       update_mode: serve_utils.UpdateMode) -> None:
+        super().update_version(version, spec, update_mode=update_mode)
+        self._setup_fallback_options(spec)
+
+    def _generate_scaling_decisions(
+        self,
+        replica_infos: List['replica_managers.ReplicaInfo'],
+    ) -> List[AutoscalerDecision]:
+        """Generate autoscaling decisions with on-demand fallback."""
+
+        self._set_target_num_replicas_with_hysteresis()
+
+        latest_nonterminal_replicas = list(
+            filter(
+                lambda info: not info.is_terminal and info.version == self.
+                latest_version, replica_infos))
+        num_nonterminal_spot, num_ready_spot = 0, 0
+        num_nonterminal_ondemand, num_ready_ondemand = 0, 0
+
+        for info in latest_nonterminal_replicas:
+            if info.is_spot:
+                if info.status == serve_state.ReplicaStatus.READY:
+                    num_ready_spot += 1
+                num_nonterminal_spot += 1
+            else:
+                if info.status == serve_state.ReplicaStatus.READY:
+                    num_ready_ondemand += 1
+                num_nonterminal_ondemand += 1
+
+        logger.info(
+            f'Number of alive spot instances: {num_nonterminal_spot}, '
+            f'Number of ready spot instances: {num_ready_spot}, '
+            f'Number of alive on-demand instances: {num_nonterminal_ondemand}, '
+            f'Number of ready on-demand instances: {num_ready_ondemand}')
+
+        scaling_decisions: List[AutoscalerDecision] = []
+        all_replica_ids_to_scale_down: List[int] = []
+
+        num_spot_to_provision = (self.get_final_target_num_replicas() -
+                                 self.base_ondemand_fallback_replicas)
+        if num_nonterminal_spot < num_spot_to_provision:
+            num_spot_to_scale_up = (num_spot_to_provision -
+                                    num_nonterminal_spot)
+            logger.info('Number of spot instances to scale up: '
+                        f'{num_spot_to_scale_up}')
+            scaling_decisions.extend(
+                _generate_scale_up_decisions(num_spot_to_scale_up,
+                                             self.SPOT_OVERRIDE))
+        elif num_nonterminal_spot > num_spot_to_provision:
+            num_spot_to_scale_down = (num_nonterminal_spot -
+                                      num_spot_to_provision)
+            replicas_to_scale_down = (
+                _select_nonterminal_replicas_to_scale_down(
+                    num_spot_to_scale_down,
+                    filter(lambda info: info.is_spot,
+                           latest_nonterminal_replicas)))
+            logger.info('Number of spot instances to scale down: '
+                        f'{num_spot_to_scale_down} {replicas_to_scale_down}')
+            all_replica_ids_to_scale_down.extend(replicas_to_scale_down)
+
+        num_ondemand_to_provision = self.base_ondemand_fallback_replicas
+        if self.dynamic_ondemand_fallback:
+            num_ondemand_to_provision += max(
+                0, num_spot_to_provision - num_ready_spot)
+
         num_ondemand_to_provision = min(num_ondemand_to_provision,
                                         self.target_num_replicas)
         if num_ondemand_to_provision > num_nonterminal_ondemand:

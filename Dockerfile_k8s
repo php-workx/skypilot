@@ -6,6 +6,7 @@ FROM continuumio/miniconda3:23.3.1-0
 ARG DEBIAN_FRONTEND=noninteractive
 # Detect architecture
 ARG TARGETARCH
+ARG SKYPILOT_GIT_URL
 
 # Initialize conda for root user, install ssh and other local dependencies
 RUN apt update -y && \
@@ -47,8 +48,10 @@ RUN conda init && \
     curl -LsSf https://astral.sh/uv/install.sh | sh && \
     $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
     source ~/skypilot-runtime/bin/activate && \
-    $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
-    $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
+    $HOME/.local/bin/uv pip install \
+        "skypilot[remote,kubernetes] @ ${SKYPILOT_GIT_URL}" \
+        'ray[default]==2.9.3' \
+        'pycryptodome==3.12.0' && \
     ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "x86_64") echo "amd64" ;; \
         "aarch64") echo "arm64" ;; \

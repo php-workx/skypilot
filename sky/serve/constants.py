@@ -47,6 +47,16 @@ DEFAULT_READINESS_PROBE_TIMEOUT_SECONDS = 15
 # Autoscaler window size in seconds for query per second. We calculate qps by
 # divide the number of queries in last window size by this window size.
 AUTOSCALER_QPS_WINDOW_SIZE_SECONDS = 60
+# Default settings for custom autoscaling metrics.
+AUTOSCALER_CUSTOM_METRIC_WINDOW_SECONDS = 60
+AUTOSCALER_CUSTOM_METRIC_STALE_AFTER_SECONDS = 180
+AUTOSCALER_CUSTOM_METRIC_DEFAULT_KIND = 'gauge'
+AUTOSCALER_CUSTOM_METRIC_DEFAULT_AGGREGATION = 'avg'
+# Default source ID for custom metrics when not provided.
+AUTOSCALER_DEFAULT_SOURCE_ID = 'default'
+# Time-to-live for a metric source. If a source has not reported any metrics
+# for this duration, it will be considered stale and removed.
+AUTOSCALER_SOURCE_TTL_SECONDS = 600
 # Autoscaler scale decision interval in seconds.
 # We will try to scale up/down every `decision_interval`.
 AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS = 20

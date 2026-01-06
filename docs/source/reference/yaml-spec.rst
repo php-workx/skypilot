@@ -1324,13 +1324,47 @@ Target queries per second per replica (optional).
 
 SkyServe will scale your service so that, ultimately, each replica manages approximately ``target_qps_per_replica`` queries per second.
 
-**Autoscaling will only be enabled if this value is specified.**
+**Autoscaling will only be enabled if this value is specified, or if**
+``autoscaling_metric`` is configured.
 
 .. code-block:: yaml
 
   service:
     replica_policy:
       target_qps_per_replica: 5
+
+
+.. _yaml-spec-service-replica-policy-autoscaling-metric:
+
+``service.replica_policy.autoscaling_metric``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Custom autoscaling metric configuration (optional).
+
+Use this to scale based on externally pushed metrics (e.g., concurrent users).
+This field is mutually exclusive with ``target_qps_per_replica``.
+
+.. code-block:: yaml
+
+  service:
+    replica_policy:
+      autoscaling_metric:
+        name: concurrent_users
+        target_per_replica: 5
+        kind: gauge            # gauge | rate
+        aggregation: max       # max | avg | last
+        window_seconds: 60
+        stale_after_seconds: 180
+
+Notes:
+
+- ``name``: Metric name to match incoming samples.
+- ``target_per_replica``: Target metric value per replica.
+- ``kind``: ``gauge`` uses aggregation over the window; ``rate`` treats values
+  as event counts and divides by ``window_seconds``.
+- ``aggregation``: Only applies to ``gauge`` metrics.
+- ``window_seconds``: Rolling window for metric calculation.
+- ``stale_after_seconds``: If no recent samples, metric is treated as 0.
 
 
 .. _yaml-spec-service-replica-policy-upscale-delay-seconds:

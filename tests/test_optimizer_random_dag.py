@@ -5,6 +5,7 @@ from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
+import pytest
 
 import sky
 from sky import catalog
@@ -15,6 +16,8 @@ DUMMY_NODES = [
     sky.optimizer._DUMMY_SOURCE_NAME,
     sky.optimizer._DUMMY_SINK_NAME,
 ]
+
+pytestmark = pytest.mark.usefixtures('enable_all_clouds')
 
 
 def generate_random_dag(
@@ -177,7 +180,7 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
     assert abs(objective - min_objective) < 2
 
 
-def test_optimizer(enable_all_clouds):
+def test_optimizer():
     for seed in range(3):
         dag = generate_random_dag(num_tasks=5, seed=seed)
         sky.Optimizer._add_dummy_source_sink_nodes(dag)

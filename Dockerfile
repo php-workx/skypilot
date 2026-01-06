@@ -18,6 +18,7 @@ FROM python:3.10.18-slim AS process-source
 
 # Control installation method - default to install from source
 ARG INSTALL_FROM_SOURCE=true
+ARG SKYPILOT_GIT_URL=
 ARG NEXT_BASE_PATH=/dashboard
 
 # Run NPM and node install in a separate step for caching.
@@ -55,6 +56,7 @@ RUN cd /skypilot && \
 FROM python:3.10.18-slim
 
 ARG INSTALL_FROM_SOURCE=true
+ARG SKYPILOT_GIT_URL
 
 # Copy Google Cloud SDK from Stage 1
 COPY --from=gcloud-apt-install /usr/lib/google-cloud-sdk /opt/google-cloud-sdk
@@ -130,7 +132,10 @@ COPY --from=process-source /skypilot /skypilot
 
 # Install SkyPilot and set up dashboard based on installation method
 RUN cd /skypilot && \
-    if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
+    if [ -n "$SKYPILOT_GIT_URL" ]; then \
+        echo "Installing from git URL ${SKYPILOT_GIT_URL}" && \
+        ~/.local/bin/uv pip install "skypilot[all] @ ${SKYPILOT_GIT_URL}" --system; \
+    elif [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Installing from source in editable mode" && \
         ~/.local/bin/uv pip install -e ".[all]" --system; \
     else \
