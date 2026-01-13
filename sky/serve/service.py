@@ -305,9 +305,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(f'Service {service_name} already exists.')
 
-            # Create the service working directory.
-            os.makedirs(service_dir, exist_ok=True)
-
             version = constants.INITIAL_VERSION
             # Add initial version information to the service state.
             serve_state.add_or_update_version(service_name, version,

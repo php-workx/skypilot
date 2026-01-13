@@ -14,7 +14,6 @@ please join us in [this
 discussion](https://github.com/skypilot-org/skypilot/discussions/1016)
 """
 import atexit
-from collections import UserDict
 import io
 import os
 import platform
@@ -187,10 +186,11 @@ if __name__ == '__main__':
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Topic :: System :: Distributed Computing',
         ],
-        project_urls={
-            'Homepage': 'https://github.com/skypilot-org/skypilot',
-            'Issues': 'https://github.com/skypilot-org/skypilot/issues',
-            'Discussion': 'https://github.com/skypilot-org/skypilot/discussions',
-            'Documentation': 'https://docs.skypilot.co/',
-        },
+        project_urls=cast(
+            Dict[str, Any], {
+                'Homepage': 'https://github.com/skypilot-org/skypilot',
+                'Issues': 'https://github.com/skypilot-org/skypilot/issues',
+                'Discussion': 'https://github.com/skypilot-org/skypilot/discussions',
+                'Documentation': 'https://docs.skypilot.co/',
+            }),
     )
