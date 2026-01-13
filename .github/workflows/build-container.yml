@@ -46,5 +46,6 @@ jobs:
           tags: ojin/skypilot-k8s:test
           build-args: |
             TARGETARCH=amd64
+            SKYPILOT_GIT_URL=git+https://github.com/php-workx/skypilot.git@ojin-release
           cache-from: type=gha,scope=k8s-cpu
           cache-to: type=gha,mode=max,scope=k8s-cpu

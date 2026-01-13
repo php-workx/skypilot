@@ -417,10 +417,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
             # we catch any error and set it to FAILED_CLEANUP instead.
             try:
                 failed = _cleanup(service_name, service_spec.pool)
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Failed to clean up service {service_name}: {e}')
+            except Exception:  # pylint: disable=broad-except
                 with ux_utils.enable_traceback():
-                    logger.error(f'  Traceback: {traceback.format_exc()}')
+                    logger.exception(
+                        f'Failed to clean up service {service_name}')
                 failed = True
 
             if failed:
@@ -430,7 +430,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, entrypoint: str):
             else:
                 shutil.rmtree(service_dir)
                 serve_state.remove_service(service_name)
-                serve_state.delete_all_versions(service_name)
                 logger.info(f'Service {service_name} terminated successfully.')
 
             _cleanup_task_run_script(job_id)

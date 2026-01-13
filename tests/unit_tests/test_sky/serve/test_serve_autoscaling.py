@@ -48,6 +48,7 @@ def _build_request_autoscaler(**overrides) -> autoscalers.Autoscaler:
 
 
 def _set_requests(autoscaler: autoscalers.Autoscaler, count: int) -> None:
+    # Use internal state directly to avoid reliance on request tracking hooks.
     autoscaler.request_timestamps = [0.0] * count
 
 
