@@ -187,12 +187,10 @@ if __name__ == '__main__':
             'Topic :: Software Development :: Libraries :: Python Modules',
             'Topic :: System :: Distributed Computing',
         ],
-        # mypy expects a dict-like protocol for this field; using UserDict avoids
-        # a false-positive due to dict.get() overloads not matching the protocol.
-        project_urls=UserDict({
+        project_urls={
             'Homepage': 'https://github.com/skypilot-org/skypilot',
             'Issues': 'https://github.com/skypilot-org/skypilot/issues',
             'Discussion': 'https://github.com/skypilot-org/skypilot/discussions',
             'Documentation': 'https://docs.skypilot.co/',
-        }),
+        },
     )
