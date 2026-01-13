@@ -468,11 +468,14 @@ def test_cleanup_marks_failed_on_thread_error(monkeypatch):
 def test_start_recovery_uses_latest_version(monkeypatch, tmp_path):
     """Use latest version and avoid service registration on recovery."""
     _patch_minimal_start(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        serve_service.serve_state, 'get_service_from_name',
-        lambda *_args, **_kwargs: {'yaml_content': 'service: s'})
-    monkeypatch.setattr(serve_service.serve_state, 'get_latest_version',
-                        lambda *_args, **_kwargs: 5)
+    monkeypatch.setattr(serve_service.serve_state, 'get_service_from_name',
+                        lambda *_args, **_kwargs: {'name': 'svc'})
+    monkeypatch.setattr(serve_service.serve_state, 'get_service_versions',
+                        lambda *_args, **_kwargs: [5])
+    monkeypatch.setattr(serve_service.serve_state, 'get_yaml_content',
+                        lambda *_args, **_kwargs: 'service: s')
+    monkeypatch.setattr(serve_service.serve_state, 'get_spec',
+                        lambda *_args, **_kwargs: _DummyServiceSpec())
     monkeypatch.setattr(serve_service.serve_state,
                         'get_service_controller_port',
                         lambda *_args, **_kwargs: 20001)
@@ -497,6 +500,110 @@ def test_start_recovery_uses_latest_version(monkeypatch, tmp_path):
         if proc.target == serve_service.controller.run_controller)
     controller_args = controller_proc.args
     assert controller_args[2] == 5
+
+
+def test_start_recovery_backfills_yaml_content(monkeypatch, tmp_path):
+    """Backfill yaml_content from task file when missing in DB."""
+    _patch_minimal_start(monkeypatch, tmp_path)
+    service_name = 'svc'
+    service_dir = tmp_path / service_name
+    service_dir.mkdir(parents=True, exist_ok=True)
+    task_yaml = service_dir / 'task_v3.yaml'
+    task_yaml.write_text('service: dummy\n', encoding='utf-8')
+
+    monkeypatch.setattr(serve_service.serve_state, 'get_service_from_name',
+                        lambda *_args, **_kwargs: {'name': service_name})
+    monkeypatch.setattr(serve_service.serve_state, 'get_service_versions',
+                        lambda *_args, **_kwargs: [3])
+    monkeypatch.setattr(serve_service.serve_state, 'get_yaml_content',
+                        lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(serve_service.serve_state, 'get_spec',
+                        lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(serve_service.serve_state,
+                        'get_service_controller_port',
+                        lambda *_args, **_kwargs: 20001)
+    monkeypatch.setattr(serve_service.serve_state,
+                        'get_service_load_balancer_port',
+                        lambda *_args, **_kwargs: 20002)
+    monkeypatch.setattr(serve_service.serve_state,
+                        'update_service_controller_pid',
+                        lambda *_args, **_kwargs: None)
+
+    backfilled = []
+
+    def _add_or_update_version(*_args, **_kwargs):
+        backfilled.append(_args[1])
+
+    monkeypatch.setattr(serve_service.serve_state, 'add_or_update_version',
+                        _add_or_update_version)
+
+    def _raise_terminate(*_args, **_kwargs):
+        raise exceptions.ServeUserTerminatedError('test')
+
+    monkeypatch.setattr(serve_service, '_handle_signal', _raise_terminate)
+
+    serve_service._start(service_name, _write_dummy_yaml(tmp_path), 7,
+                         'entrypoint')
+
+    assert backfilled == [3]
+    controller_proc = next(
+        proc for proc in _DummyProcess.instances
+        if proc.target == serve_service.controller.run_controller)
+    assert controller_proc.args[2] == 3
+
+
+def test_start_recovery_skips_missing_yaml(monkeypatch, tmp_path):
+    """Skip versions without yaml_content and task file during recovery."""
+    _patch_minimal_start(monkeypatch, tmp_path)
+    service_name = 'svc'
+    service_dir = tmp_path / service_name
+    service_dir.mkdir(parents=True, exist_ok=True)
+    task_yaml = service_dir / 'task_v2.yaml'
+    task_yaml.write_text('service: dummy\n', encoding='utf-8')
+
+    monkeypatch.setattr(serve_service.serve_state, 'get_service_from_name',
+                        lambda *_args, **_kwargs: {'name': service_name})
+    monkeypatch.setattr(serve_service.serve_state, 'get_service_versions',
+                        lambda *_args, **_kwargs: [3, 2])
+
+    def _get_yaml_content(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(serve_service.serve_state, 'get_yaml_content',
+                        _get_yaml_content)
+    monkeypatch.setattr(serve_service.serve_state, 'get_spec',
+                        lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(serve_service.serve_state,
+                        'get_service_controller_port',
+                        lambda *_args, **_kwargs: 20001)
+    monkeypatch.setattr(serve_service.serve_state,
+                        'get_service_load_balancer_port',
+                        lambda *_args, **_kwargs: 20002)
+    monkeypatch.setattr(serve_service.serve_state,
+                        'update_service_controller_pid',
+                        lambda *_args, **_kwargs: None)
+
+    backfilled = []
+
+    def _add_or_update_version(*_args, **_kwargs):
+        backfilled.append(_args[1])
+
+    monkeypatch.setattr(serve_service.serve_state, 'add_or_update_version',
+                        _add_or_update_version)
+
+    def _raise_terminate(*_args, **_kwargs):
+        raise exceptions.ServeUserTerminatedError('test')
+
+    monkeypatch.setattr(serve_service, '_handle_signal', _raise_terminate)
+
+    missing_yaml = str(tmp_path / 'missing.yaml')
+    serve_service._start(service_name, missing_yaml, 8, 'entrypoint')
+
+    assert backfilled == [2]
+    controller_proc = next(
+        proc for proc in _DummyProcess.instances
+        if proc.target == serve_service.controller.run_controller)
+    assert controller_proc.args[2] == 2
 
 
 def test_start_pool_mode_skips_load_balancer(monkeypatch, tmp_path):
