@@ -4,8 +4,11 @@ import pytest
 
 from sky.serve import autoscalers
 from sky.serve import constants as serve_constants
+from sky.serve import controller as serve_controller
+from sky.serve import replica_managers
 from sky.serve.service_spec import AutoscalingMetricSpec
 from sky.serve.service_spec import SkyServiceSpec
+from sky.utils import common_utils
 
 
 def _build_metric_spec(**overrides) -> AutoscalingMetricSpec:
@@ -35,6 +38,36 @@ def _build_service_spec(metric_spec: AutoscalingMetricSpec,
     }
     data.update(overrides)
     return SkyServiceSpec(**data)
+
+
+def _build_request_service_spec(**overrides) -> SkyServiceSpec:
+    data = {
+        'readiness_path': '/',
+        'initial_delay_seconds': serve_constants.DEFAULT_INITIAL_DELAY_SECONDS,
+        'readiness_timeout_seconds':
+            serve_constants.DEFAULT_READINESS_PROBE_TIMEOUT_SECONDS,
+        'min_replicas': 2,
+        'max_replicas': 10,
+        'num_overprovision': 1,
+        'target_qps_per_replica': 5,
+    }
+    data.update(overrides)
+    return SkyServiceSpec(**data)
+
+
+def _make_ready_replica(replica_id: int,
+                        version: int) -> replica_managers.ReplicaInfo:
+    info = replica_managers.ReplicaInfo(replica_id=replica_id,
+                                        cluster_name=f'replica-{replica_id}',
+                                        replica_port='8080',
+                                        is_spot=False,
+                                        location=None,
+                                        version=version,
+                                        resources_override=None)
+    info.status_property.sky_launch_status = common_utils.ProcessStatus.SUCCEEDED
+    info.status_property.service_ready_now = True
+    info.status_property.first_ready_time = time.time()
+    return info
 
 
 def test_service_spec_autoscaling_metric_roundtrip():
@@ -81,6 +114,62 @@ def test_service_spec_autoscaling_metric_conflicts_with_qps():
     }
     with pytest.raises(ValueError):
         SkyServiceSpec.from_yaml_config(config)
+
+
+def test_controller_autoscaler_latest_version_initialized(monkeypatch):
+
+    class DummyReplicaManager:
+
+        def __init__(self, service_name, spec, version):
+            self.service_name = service_name
+            self.spec = spec
+            self.version = version
+
+    monkeypatch.setattr(serve_controller.replica_managers,
+                        'SkyPilotReplicaManager', DummyReplicaManager)
+
+    metric_spec = _build_metric_spec()
+    spec = _build_service_spec(metric_spec)
+
+    controller = serve_controller.SkyServeController('svc',
+                                                     spec,
+                                                     version=3,
+                                                     host='127.0.0.1',
+                                                     port=1234)
+    assert controller._autoscaler.latest_version == 3
+
+
+def test_controller_restart_no_scale_churn(monkeypatch):
+
+    class DummyReplicaManager:
+
+        def __init__(self, service_name, spec, version):
+            self.service_name = service_name
+            self.spec = spec
+            self.version = version
+
+    monkeypatch.setattr(serve_controller.replica_managers,
+                        'SkyPilotReplicaManager', DummyReplicaManager)
+
+    spec = _build_request_service_spec()
+    controller = serve_controller.SkyServeController('svc',
+                                                     spec,
+                                                     version=3,
+                                                     host='127.0.0.1',
+                                                     port=1234)
+
+    replica_infos = [
+        _make_ready_replica(1, version=3),
+        _make_ready_replica(2, version=3),
+        _make_ready_replica(3, version=3),
+    ]
+    decisions = controller._autoscaler.generate_scaling_decisions(
+        replica_infos, active_versions=[3])
+    scale_ups = [
+        decision for decision in decisions
+        if decision.operator == autoscalers.AutoscalerDecisionOperator.SCALE_UP
+    ]
+    assert scale_ups == []
 
 
 def test_external_metric_autoscaler_gauge_single_source():
