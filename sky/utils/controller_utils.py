@@ -587,8 +587,15 @@ def shared_controller_vars_to_fill(
     override_launches_per_service = os.environ.get(
         constants.SERVE_OVERRIDE_LAUNCHES_PER_SERVICE, None)
     if override_launches_per_service is not None:
-        env_vars[constants.SERVE_OVERRIDE_LAUNCHES_PER_SERVICE] = str(
-            int(override_launches_per_service))
+        try:
+            value = int(override_launches_per_service)
+            if value <= 0:
+                raise ValueError('must be a positive integer')
+            env_vars[constants.SERVE_OVERRIDE_LAUNCHES_PER_SERVICE] = str(value)
+        except ValueError:
+            logger.warning(
+                f'Invalid {constants.SERVE_OVERRIDE_LAUNCHES_PER_SERVICE}='
+                f'{override_launches_per_service!r}; ignoring override.')
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
         env_vars[
