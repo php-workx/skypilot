@@ -1,5 +1,16 @@
 # Keep .git history for skypilot repository to serve git info when install from source
 */**/.git
 **/__pycache__
+.venv
+**/.venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.tox
+.eggs
+*.egg-info
+build
+dist
+node_modules
 sky/dashboard/node_modules
 sky/dashboard/.next
