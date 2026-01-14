@@ -1265,8 +1265,26 @@ POOL_JOBS_RESOURCES_RATIO = 1
 # increased a bit to around 16 but keeping it lower to just to be safe
 LAUNCHES_PER_WORKER = 8
 # Number of ongoing launches allowed per service. Can probably be increased
-# a bit as well.
+# a bit as well. Override via SKYPILOT_SERVE_OVERRIDE_LAUNCHES_PER_SERVICE.
 LAUNCHES_PER_SERVICE = 4
+
+
+def _get_launches_per_service() -> int:
+    override = os.environ.get(constants.SERVE_OVERRIDE_LAUNCHES_PER_SERVICE)
+    if override is None:
+        return LAUNCHES_PER_SERVICE
+    try:
+        value = int(override)
+        if value <= 0:
+            raise ValueError('must be positive')
+    except ValueError:
+        logger.warning(
+            f'Invalid {constants.SERVE_OVERRIDE_LAUNCHES_PER_SERVICE}='
+            f'{override!r}; '
+            f'using default {LAUNCHES_PER_SERVICE}.')
+        return LAUNCHES_PER_SERVICE
+    return value
+
 
 # Based on testing, each worker takes around 200-300MB memory. Keeping it
 # higher to be safe.
@@ -1348,7 +1366,7 @@ def _get_parallelism(pool: bool, raw_resource_per_unit: float) -> int:
     # We need to do the resource management ourselves.
     if not consolidation_mode:
         launches_per_worker = (LAUNCHES_PER_WORKER
-                               if pool else LAUNCHES_PER_SERVICE)
+                               if pool else _get_launches_per_service())
         resource_per_unit_worker = (launches_per_worker *
                                     server_config.LONG_WORKER_MEM_GB * 1024)
 
@@ -1391,7 +1409,7 @@ def _get_request_parallelism(pool: bool) -> int:
         return int(override_concurrent_launches)
     # Limitation per service x number of services
     launches_per_worker = (LAUNCHES_PER_WORKER
-                           if pool else LAUNCHES_PER_SERVICE)
+                           if pool else _get_launches_per_service())
     return (launches_per_worker * POOL_JOBS_RESOURCES_RATIO *
             _get_number_of_services(pool))
 
