@@ -31,16 +31,23 @@ RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         npm install -g npm@latest; \
 fi
 
+WORKDIR /skypilot
+
+# Cache dashboard dependencies based on package files only.
+COPY sky/dashboard/package.json sky/dashboard/package-lock.json /skypilot/sky/dashboard/
+
+RUN if [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
+        npm --prefix sky/dashboard install; \
+fi
+
 COPY . /skypilot
 
-RUN cd /skypilot && \
-    if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
+RUN if [ "$INSTALL_FROM_SOURCE" != "true" ]; then \
         echo "Removing source code (wheel installation)" && \
         # Retain an /skypilot/dist dir to keep the compatibility in stage 3 and reduce the final image size
         mv /skypilot/dist /dist.backup && cd .. && rm -rf /skypilot && mkdir /skypilot && mv /dist.backup /skypilot/dist; \
     else \
         echo "Building dashboard in Stage 2" && \
-        npm --prefix sky/dashboard install && \
         NEXT_BASE_PATH=${NEXT_BASE_PATH} npm --prefix sky/dashboard run build && \
         echo "Cleaning up dashboard build-time dependencies" && \
         rm -rf sky/dashboard/node_modules ~/.npm /root/.npm && \
@@ -134,10 +141,15 @@ COPY --from=process-source /skypilot /skypilot
 RUN cd /skypilot && \
     if [ -n "$SKYPILOT_GIT_URL" ]; then \
         echo "Installing from git URL ${SKYPILOT_GIT_URL}" && \
-        ~/.local/bin/uv pip install "skypilot[all] @ ${SKYPILOT_GIT_URL}" --system; \
+        ~/.local/bin/uv pip install --no-cache "skypilot[all] @ ${SKYPILOT_GIT_URL}" --system && \
+        SITE_PY=$(python -c "import site; print(site.getsitepackages()[0])") && \
+        if [ -d /skypilot/sky/dashboard/out ]; then \
+            mkdir -p "$SITE_PY/sky/dashboard/out" && \
+            cp -r /skypilot/sky/dashboard/out/* "$SITE_PY/sky/dashboard/out/"; \
+        fi; \
     elif [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Installing from source in editable mode" && \
-        ~/.local/bin/uv pip install -e ".[all]" --system; \
+        ~/.local/bin/uv pip install --no-cache -e ".[all]" --system; \
     else \
         echo "Installing from wheel file" && \
         WHEEL_FILE=$(ls dist/*skypilot*.whl 2>/dev/null | head -1) && \
@@ -146,7 +158,7 @@ RUN cd /skypilot && \
             ls -la /skypilot/dist/ && \
             exit 1; \
         fi && \
-        ~/.local/bin/uv pip install "${WHEEL_FILE}[all]" --system && \
+        ~/.local/bin/uv pip install --no-cache "${WHEEL_FILE}[all]" --system && \
         echo "Skipping dashboard build for wheel installation"; \
     fi && \
     # Cleanup all caches to reduce the image size
