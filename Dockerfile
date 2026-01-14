@@ -145,7 +145,7 @@ RUN cd /skypilot && \
         SITE_PY=$(python -c "import site; print(site.getsitepackages()[0])") && \
         if [ -d /skypilot/sky/dashboard/out ]; then \
             mkdir -p "$SITE_PY/sky/dashboard/out" && \
-            cp -r /skypilot/sky/dashboard/out/* "$SITE_PY/sky/dashboard/out/"; \
+            cp -r /skypilot/sky/dashboard/out/. "$SITE_PY/sky/dashboard/out/"; \
         fi; \
     elif [ "$INSTALL_FROM_SOURCE" = "true" ]; then \
         echo "Installing from source in editable mode" && \
