@@ -85,6 +85,10 @@ spec:
           value: {{ .Release.Name | quote }}
         - name: SKYPILOT_CONTROLLER_IMAGE
           value: {{ default .Values.apiService.image .Values.apiService.controllerImage | quote }}
+        {{- if ne .Values.apiService.serveOverrideLaunchesPerService nil }}
+        - name: SKYPILOT_SERVE_OVERRIDE_LAUNCHES_PER_SERVICE
+          value: {{ .Values.apiService.serveOverrideLaunchesPerService | quote }}
+        {{- end }}
         {{- if include "skypilot.enableBasicAuthInAPIServer" . | trim | eq "true" }}
         - name: SKYPILOT_INITIAL_BASIC_AUTH
           valueFrom:

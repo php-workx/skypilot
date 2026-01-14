@@ -50,6 +50,13 @@
                         "type": "object"
                     }
                 },
+                "serveOverrideLaunchesPerService": {
+                    "type": [
+                        "integer",
+                        "string",
+                        "null"
+                    ]
+                },
                 "extraVolumeMounts": {
                     "type": [
                         "array",

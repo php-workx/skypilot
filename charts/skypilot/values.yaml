@@ -151,6 +151,10 @@ apiService:
   #     value: "my_value"
   # @schema type: [array, null]; item: object
   extraEnvs: null
+  # Override the concurrent launches per serve service. When set, this value
+  # is passed to the serve controller via the API server environment.
+  # @schema type: [string, integer, null]
+  serveOverrideLaunchesPerService: null
 
   # Extra volumes to mount to the API server. Example:
   # extraVolumes:

@@ -584,6 +584,11 @@ def shared_controller_vars_to_fill(
     if override_concurrent_launches is not None:
         env_vars[constants.SERVE_OVERRIDE_CONCURRENT_LAUNCHES] = str(
             int(override_concurrent_launches))
+    override_launches_per_service = os.environ.get(
+        constants.SERVE_OVERRIDE_LAUNCHES_PER_SERVICE, None)
+    if override_launches_per_service is not None:
+        env_vars[constants.SERVE_OVERRIDE_LAUNCHES_PER_SERVICE] = str(
+            int(override_launches_per_service))
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
         env_vars[
