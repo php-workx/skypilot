@@ -1,8 +1,16 @@
+import logging
 from unittest import mock
 
 import pytest
 
 from sky.server import config
+from sky.skylet import constants
+from sky.utils import annotations
+from sky.utils import controller_utils
+
+
+def _clear_controller_utils_cache() -> None:
+    annotations.clear_request_level_cache()
 
 
 @mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=8)
@@ -80,7 +88,6 @@ def test_compute_server_config_low_resources(cpu_count, mem_size_gb):
 @mock.patch('sky.utils.env_options.Options.RUNNING_IN_BUILDKITE.get',
             return_value=False)
 def test_compute_server_config_pool(cpu_count, mem_size_gb, buildkite_mock):
-    from sky.utils import controller_utils
     reserved_memory_mb = float(
         controller_utils.MAXIMUM_CONTROLLER_RESERVED_MEMORY_MB)
 
@@ -96,6 +103,43 @@ def test_compute_server_config_pool(cpu_count, mem_size_gb, buildkite_mock):
 
     assert controller_utils._get_number_of_services(pool=True) == 5
     assert controller_utils._get_request_parallelism(pool=True) == 40
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=8)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=4)
+def test_serve_launches_per_service_override(cpu_count, mem_size_gb,
+                                             monkeypatch):
+    """Override launches per service adjusts service limits."""
+    monkeypatch.setenv(constants.SERVE_OVERRIDE_LAUNCHES_PER_SERVICE, '3')
+    _clear_controller_utils_cache()
+
+    assert controller_utils._get_number_of_services(pool=False) == 3
+    assert controller_utils._get_request_parallelism(pool=False) == 9
+
+    _clear_controller_utils_cache()
+
+
+@mock.patch('sky.utils.common_utils.get_mem_size_gb', return_value=8)
+@mock.patch('sky.utils.common_utils.get_cpu_count', return_value=4)
+def test_serve_launches_per_service_invalid_override(cpu_count, mem_size_gb,
+                                                     monkeypatch, caplog):
+    """Invalid overrides fall back to defaults and warn."""
+    monkeypatch.setenv(constants.SERVE_OVERRIDE_LAUNCHES_PER_SERVICE, '0')
+    _clear_controller_utils_cache()
+
+    logger = controller_utils.logger
+    previous_level = logger.level
+    logger.addHandler(caplog.handler)
+    logger.setLevel(logging.WARNING)
+    try:
+        assert controller_utils._get_number_of_services(pool=False) == 2
+    finally:
+        logger.removeHandler(caplog.handler)
+        logger.setLevel(previous_level)
+    assert f'Invalid {constants.SERVE_OVERRIDE_LAUNCHES_PER_SERVICE}' in (
+        caplog.text)
+
+    _clear_controller_utils_cache()
 
 
 def test_parallel_size_long():

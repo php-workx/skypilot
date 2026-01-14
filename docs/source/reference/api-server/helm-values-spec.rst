@@ -69,6 +69,7 @@ Below is the available helm value keys and the default value of each key:
         cpu: "4"
         memory: "8Gi"
     :ref:`skypilotDev <helm-values-apiService-skypilotDev>`: false
+    :ref:`serveOverrideLaunchesPerService <helm-values-apiService-serveOverrideLaunchesPerService>`: null
     :ref:`metrics <helm-values-apiService-metrics>`:
       :ref:`enabled <helm-values-apiService-metrics-enabled>`: false
       :ref:`port <helm-values-apiService-metrics-port>`: 9090
@@ -658,6 +659,21 @@ Default: ``false``
 
   apiService:
     skypilotDev: false
+
+.. _helm-values-apiService-serveOverrideLaunchesPerService:
+
+``apiService.serveOverrideLaunchesPerService``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Override the concurrent launches per serve service. This value is passed to
+the serve controller via the API server environment.
+
+Default: ``null``
+
+.. code-block:: yaml
+
+  apiService:
+    serveOverrideLaunchesPerService: 3
 
 .. _helm-values-apiService-metrics:
 
